@@ -269,6 +269,7 @@
   const alignCache = new Map();
   let alignIdx = -1;
   let alignLoading = false;
+  let zhAlignKey = "";
   let zhSize = Number(localStorage.getItem("ting-zh-size") || 21);
 
   const native = (message) => window.webkit?.messageHandlers?.sync?.postMessage(message);
@@ -409,6 +410,7 @@
   function applyMode() {
     card.classList.remove("mode-bi", "mode-en", "mode-zh", "mode-align");
     card.classList.add(`mode-${mode}`);
+    zhAlignKey = "";
     modeButton.textContent = MODE_LABELS[mode];
     modeButton.title = `字幕显示：${MODE_LABELS[mode]}（点击切换）`;
     localStorage.setItem("ting-mode", mode);
@@ -798,7 +800,7 @@
     progressBar.style.width = "0%";
   }
 
-  function renderAlignedChinese(entry) {
+  function renderAlignedChinese(idx, entry) {
     zhLine.textContent = "";
     zhLine.classList.remove("pending");
     const words = [...enLine.querySelectorAll(".w")];
@@ -822,7 +824,10 @@
       zhLine.appendChild(document.createTextNode(" "));
       rendered += 1;
     }
-    if (rendered) return;
+    if (rendered) {
+      zhAlignKey = `${idx}|${entry?.segments?.length || 0}|${entry?.parts?.length || 0}`;
+      return;
+    }
     for (let i = 0; i < words.length; i += 1) {
       const fallback = state?.words?.[words[i].dataset.key] || parts[i] || "";
       if (!fallback) continue;
@@ -835,12 +840,15 @@
       rendered += 1;
     }
     if (!rendered) zhLine.textContent = "没有拿到逐词对照";
-    fitPanelToContent(true);
+    zhAlignKey = `${idx}|${entry?.segments?.length || 0}|${entry?.parts?.length || 0}`;
   }
 
   async function requestAlign(idx) {
     if (alignCache.has(idx)) {
-      renderAlignedChinese(alignCache.get(idx));
+      if (state?.idx === idx && mode === "align") {
+        renderAlignedChinese(idx, alignCache.get(idx));
+        fitPanelToContent(true);
+      }
       return;
     }
     if (alignLoading && alignIdx === idx) return;
@@ -852,12 +860,19 @@
       if (data?.ok && (Array.isArray(data.parts) || Array.isArray(data.segments))) {
         const entry = { parts: data.parts || [], segments: data.segments || [] };
         alignCache.set(idx, entry);
-        if (state?.idx === idx && mode === "align") renderAlignedChinese(entry);
+        if (state?.idx === idx && mode === "align") {
+          renderAlignedChinese(idx, entry);
+          fitPanelToContent(true);
+        }
       } else if (state?.idx === idx && mode === "align") {
         zhLine.textContent = "逐词暂不可用";
+        zhAlignKey = `error:${idx}`;
       }
     } catch {
-      if (state?.idx === idx && mode === "align") zhLine.textContent = "逐词暂不可用";
+      if (state?.idx === idx && mode === "align") {
+        zhLine.textContent = "逐词暂不可用";
+        zhAlignKey = `error:${idx}`;
+      }
     } finally {
       alignLoading = false;
     }
@@ -887,16 +902,16 @@
 
   function fitPanelToContent(force = false) {
     if (!state || state.status !== "ready") return;
-    const key = `${state.idx}|${mode}|${zhSize}|${preferredPanelHeight}|${settings.wordUnderline ? 1 : 0}`;
+    const key = `${state.idx}|${mode}|${zhSize}|${preferredPanelHeight}|${settings.wordUnderline ? 1 : 0}|${zhAlignKey}`;
     if (!force && key === lastFitKey) return;
     lastFitKey = key;
     textScale = 1;
     applySize();
     const natural = Math.ceil(card.scrollHeight + 24);
     const target = Math.min(MAX_PANEL_HEIGHT, Math.max(preferredPanelHeight, natural));
-    setPanelHeight(target);
+    if (Math.abs(target - currentPanelHeight) > 6) setPanelHeight(target);
     let guard = 0;
-    while (Math.ceil(card.scrollHeight + 24) > target + 2 && textScale > 0.74 && guard < 8) {
+    while (Math.ceil(card.scrollHeight + 24) > currentPanelHeight + 2 && textScale > 0.74 && guard < 8) {
       textScale *= 0.92;
       applySize();
       guard += 1;
@@ -939,19 +954,26 @@
     timeLine.textContent = next.d ? `${fmt(next.t)} / ${fmt(next.d)}` : fmt(next.t);
     renderEnglish(next.en, next.words);
     if (mode === "align") {
-      if (alignCache.has(next.idx)) {
-        renderAlignedChinese(alignCache.get(next.idx));
-      } else {
+      const entry = alignCache.get(next.idx);
+      const key = entry ? `${next.idx}|${entry.segments?.length || 0}|${entry.parts?.length || 0}` : `loading:${next.idx}`;
+      if (entry) {
+        if (key !== zhAlignKey) renderAlignedChinese(next.idx, entry);
+      } else if (key !== zhAlignKey) {
         zhLine.innerHTML = '逐词加载中<span class="dots"></span>';
         zhLine.classList.remove("pending");
+        zhAlignKey = key;
         requestAlign(next.idx);
       }
     } else if (next.zh) {
-      zhLine.textContent = next.zh;
-      zhLine.classList.remove("pending");
+      if (zhLine.textContent !== next.zh || zhLine.classList.contains("pending")) {
+        zhLine.textContent = next.zh;
+        zhLine.classList.remove("pending");
+      }
     } else {
-      zhLine.innerHTML = '译文中<span class="dots"></span>';
-      zhLine.classList.add("pending");
+      if (!zhLine.classList.contains("pending")) {
+        zhLine.innerHTML = '译文中<span class="dots"></span>';
+        zhLine.classList.add("pending");
+      }
     }
     const span = next.cueEnd - next.cueStart;
     const ratio = span > 0 ? Math.max(0, Math.min(1, (next.t - next.cueStart) / span)) : 0;
