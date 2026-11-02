@@ -316,18 +316,22 @@
   const GLOBAL_SHORTCUT_NAMES = ["toggleSubtitle", "toggleSettings"];
   const DEFAULT_SHORTCUTS = {
     toggleSubtitle: { key: "b", keyCode: 66, modifiers: 256 },
-    toggleSettings: { key: "s", keyCode: 19, modifiers: 768 },
-    play: { key: " ", keyCode: 32, modifiers: 0 },
-    prev: { key: "arrowleft", keyCode: 37, modifiers: 0 },
-    next: { key: "arrowright", keyCode: 39, modifiers: 0 },
-    mode: { key: "m", keyCode: 46, modifiers: 0 },
-    bg: { key: "b", keyCode: 66, modifiers: 0 },
-    speedUp: { key: "]", keyCode: 221, modifiers: 0 },
-    speedDown: { key: "[", keyCode: 219, modifiers: 0 },
-    fontUp: { key: "+", keyCode: 187, modifiers: 512 },
-    fontDown: { key: "-", keyCode: 189, modifiers: 0 },
+    toggleSettings: { key: "s", keyCode: 83, modifiers: 768 },
+    play: { key: " ", keyCode: 32, modifiers: 6144 },
+    prev: { key: "arrowleft", keyCode: 37, modifiers: 6144 },
+    next: { key: "arrowright", keyCode: 39, modifiers: 6144 },
+    mode: { key: "m", keyCode: 77, modifiers: 6144 },
+    bg: { key: "b", keyCode: 66, modifiers: 6144 },
+    speedUp: { key: "]", keyCode: 221, modifiers: 6144 },
+    speedDown: { key: "[", keyCode: 219, modifiers: 6144 },
+    fontUp: { key: "=", keyCode: 187, modifiers: 6144 },
+    fontDown: { key: "-", keyCode: 189, modifiers: 6144 },
     settings: { key: ",", keyCode: 188, modifiers: 0 },
   };
+  if (!localStorage.getItem("ting-shortcuts-v2")) {
+    localStorage.setItem("ting-shortcuts", JSON.stringify(DEFAULT_SHORTCUTS));
+    localStorage.setItem("ting-shortcuts-v2", "1");
+  }
   function loadShortcuts() {
     try {
       const stored = JSON.parse(localStorage.getItem("ting-shortcuts") || "{}");
@@ -350,13 +354,17 @@
     if (notify) native({ action: "setBaseHeight", height: target });
   }
 
+  let lastShortcutPayload = "";
   function syncShortcutsToNative() {
     const payload = {};
     for (const [name, sc] of Object.entries(shortcuts)) {
       if (sc?.keyCode && sc?.modifiers) {
-        payload[name] = { keyCode: sc.keyCode, modifiers: sc.modifiers };
+        payload[name] = { key: sc.key || "", keyCode: sc.keyCode, modifiers: sc.modifiers };
       }
     }
+    const serialized = JSON.stringify(payload);
+    if (serialized === lastShortcutPayload) return;
+    lastShortcutPayload = serialized;
     native({ action: "setShortcuts", shortcuts: payload });
   }
 
