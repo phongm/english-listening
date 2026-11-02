@@ -1,0 +1,1203 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>同步字幕</title>
+<style>
+  :root { --zh-size: 21px; --en-size: 15px; --bg-alpha: .76; --panel-height: 200px; --card-height: 176px; }
+  * { box-sizing: border-box; }
+  html, body { width: 100%; height: 100%; margin: 0; background: transparent; overflow: hidden; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "PingFang SC", "Helvetica Neue", Arial, sans-serif;
+    -webkit-font-smoothing: antialiased;
+    color: #fff;
+    user-select: none;
+    -webkit-user-select: none;
+    cursor: grab;
+  }
+  body.dragging, body.dragging * { cursor: grabbing; }
+  #stage { position: relative; width: 100%; height: 100%; padding: 10px 12px 14px; display: flex; align-items: flex-end; }
+  #card {
+    position: relative;
+    flex: none;
+    height: auto;
+    min-height: var(--card-height);
+    max-height: calc(var(--panel-height) - 24px);
+    width: 100%;
+    display: flex;
+    flex-direction: column;
+    padding: 12px 18px 10px;
+    border-radius: 12px;
+    background: rgba(10, 12, 18, var(--bg-alpha));
+    border: 1px solid rgba(255, 255, 255, .08);
+    box-shadow: 0 8px 24px rgba(0, 0, 0, .18);
+    overflow: hidden;
+    transition: opacity .25s ease;
+  }
+  #card.notice { justify-content: center; }
+  #grip {
+    position: absolute; top: 4px; left: 50%; transform: translateX(-50%);
+    width: 40px; height: 3px; border-radius: 2px;
+    background: rgba(255, 255, 255, .38); opacity: 0;
+    transition: opacity .18s ease;
+  }
+  #card:hover #grip { opacity: 1; }
+  #meta, #en, #zh, #time, #status {
+    text-shadow:
+      0 0 1px rgba(0, 0, 0, 1),
+      1px 0 1px rgba(0, 0, 0, .72),
+      -1px 0 1px rgba(0, 0, 0, .72),
+      0 1px 1px rgba(0, 0, 0, .72),
+      0 -1px 1px rgba(0, 0, 0, .72);
+  }
+  #tip {
+    position: fixed; z-index: 20; left: 0; top: 0;
+    max-width: 380px; max-height: calc(var(--panel-height) - 24px); overflow: hidden;
+    padding: 6px 10px; border-radius: 8px;
+    background: rgba(10, 12, 18, .95);
+    border: 1px solid rgba(255, 255, 255, .16);
+    box-shadow: 0 6px 22px rgba(0, 0, 0, .45);
+    color: #fff; font-size: 13px; line-height: 1.45;
+    display: none; pointer-events: none;
+  }
+  #tip.show { display: block; }
+  #tip.pinned { pointer-events: auto; }
+  #tip .actions { display: flex; gap: 5px; margin-top: 6px; }
+  #tip .actions button {
+    appearance: none; border: 1px solid rgba(255,255,255,.16); border-radius: 6px;
+    background: rgba(255,255,255,.08); color: rgba(255,255,255,.82); padding: 1px 6px;
+    font-size: 11px; cursor: pointer;
+  }
+  #tip .actions button:hover { background: rgba(255,255,255,.16); color: #fff; }
+  #tip b { font-weight: 650; color: #cfd9ff; margin-right: 7px; }
+  #tip.pending { color: rgba(255, 255, 255, .55); }
+  #tip .def { display: block; margin-top: 3px; color: rgba(255, 255, 255, .82); }
+  #tip .def em { font-style: normal; color: #9fb0e8; font-size: 11px; margin-right: 5px; }
+  #meta {
+    display: flex; align-items: center; gap: 8px;
+    font-size: 11px; line-height: 14px; color: rgba(255, 255, 255, .58);
+    letter-spacing: .2px; min-height: 14px; padding-top: 4px;
+  }
+  #title { max-width: 58%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  #status { flex: none; }
+  #status::before {
+    content: ""; display: inline-block; width: 5px; height: 5px; border-radius: 50%;
+    background: #6ee7a8; margin-right: 5px; vertical-align: 1px;
+    box-shadow: 0 0 6px rgba(110, 231, 168, .6);
+  }
+  #card.dim #status::before { background: #f5c451; box-shadow: none; }
+  #card.dim #en, #card.dim #zh { opacity: .82; }
+  #card.notice #status::before { background: #7aa2ff; box-shadow: none; }
+  #card.no-underline .w, #card.no-underline #zh .a { text-decoration: none; }
+  #card.tools-always #tools { opacity: 1; }
+  #time { margin-left: auto; font-variant-numeric: tabular-nums; flex: none; }
+  #lines {
+    flex: 1 0 auto;
+    display: flex; flex-direction: column; justify-content: center; gap: 5px;
+    padding: 2px 2px 4px;
+    overflow: visible;
+  }
+  #en {
+    font-size: var(--en-size); line-height: 1.34; color: rgba(255, 255, 255, .88);
+    overflow-wrap: anywhere;
+  }
+  #en .w {
+    cursor: help;
+    text-decoration: underline solid rgba(255, 255, 255, .42);
+    text-decoration-thickness: 1px;
+    text-underline-offset: 3px;
+  }
+  #en .w.missing { text-decoration-color: rgba(255, 255, 255, .16); }
+  #en .w, #zh .a { color: rgba(255, 255, 255, .58); transition: color .18s linear; }
+  #en .w.sung, #zh .a.sung { color: #fff; }
+  #zh .a.neutral { color: rgba(255, 255, 255, .65); }
+  #en .w:hover, #en .w.on {
+    color: #fff;
+    text-decoration-style: solid;
+    text-decoration-color: #a8bcff;
+  }
+  #zh {
+    font-size: var(--zh-size); line-height: 1.36; font-weight: 500; color: #fff;
+    overflow-wrap: anywhere;
+    text-wrap: pretty;
+  }
+  #zh.pending { color: rgba(255, 255, 255, .38); font-weight: 400; font-size: calc(var(--zh-size) - 2px); }
+  #zh .dots::after {
+    content: ""; animation: dots 1.2s steps(4, end) infinite;
+  }
+  #card.mode-en #zh, #card.mode-zh #en { display: none; }
+  #card.mode-align #en .w { text-decoration-color: var(--uc, rgba(255, 255, 255, .32)); }
+  #card.mode-align #zh {
+    font-size: calc(var(--en-size) + 2px); line-height: 1.45; font-weight: 500;
+  }
+  #zh .a {
+    text-decoration: underline solid var(--uc, transparent);
+    text-decoration-thickness: 1.5px;
+    text-underline-offset: 4px;
+    padding-bottom: 1px;
+  }
+  #zh .a.empty { opacity: .35; }
+  @keyframes dots { 0% { content: ""; } 25% { content: "."; } 50% { content: ".."; } 75% { content: "..."; } }
+  .swap #en, .swap #zh { animation: swap .26s ease; }
+  @keyframes swap { from { opacity: .25; transform: translateY(3px); } to { opacity: 1; transform: none; } }
+  #bottom { display: flex; align-items: center; gap: 10px; min-height: 18px; }
+  #progress { flex: 1; height: 2px; border-radius: 1px; background: rgba(255, 255, 255, .1); overflow: hidden; }
+  #progress i { display: block; height: 100%; width: 0; background: linear-gradient(90deg, #7aa2ff, #a78bfa); transition: width .18s linear; }
+  #tools { display: flex; align-items: center; gap: 4px; opacity: 0; transition: opacity .18s ease; }
+  #card:hover #tools, #card:focus-within #tools { opacity: 1; }
+  #tools button {
+    appearance: none; border: 0; padding: 0; margin: 0;
+    width: 22px; height: 22px; border-radius: 6px;
+    background: rgba(0, 0, 0, .42); color: rgba(255, 255, 255, .82);
+    font: 500 12px/22px -apple-system, "PingFang SC", sans-serif;
+    cursor: pointer; display: inline-flex; align-items: center; justify-content: center;
+    transition: background .15s ease, color .15s ease;
+  }
+  #tools button:hover { background: rgba(0, 0, 0, .68); color: #fff; }
+  #tools button:active { transform: scale(.94); }
+  #tools button.text { width: auto; min-width: 36px; padding: 0 7px; font-size: 11px; }
+  #tools svg { width: 13px; height: 13px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
+  #tools .sep { width: 1px; height: 14px; background: rgba(255, 255, 255, .14); margin: 0 2px; flex: none; }
+  #card.notice #lines { flex: none; align-items: center; text-align: center; }
+  #card.notice #en { display: none; }
+  #card.notice #zh { font-weight: 400; color: rgba(255, 255, 255, .78); font-size: calc(var(--zh-size) - 3px); }
+  #card.notice #progress { visibility: hidden; }
+  #settings {
+    display: none; position: absolute; z-index: 16; right: 14px; bottom: 44px;
+    width: min(340px, calc(100% - 28px)); max-height: calc(var(--panel-height) - 56px);
+    padding: 8px 10px 10px; border-radius: 10px;
+    background: rgba(8, 10, 16, .96); border: 1px solid rgba(255, 255, 255, .14);
+    box-shadow: 0 12px 34px rgba(0, 0, 0, .35);
+    color: #fff; overflow-y: auto; font-size: 12px;
+  }
+  #card.settings #settings { display: block; }
+  .shead { display: flex; justify-content: space-between; align-items: center; font-weight: 650; margin-bottom: 7px; }
+  .srow { display: flex; align-items: center; justify-content: space-between; gap: 8px; min-height: 25px; }
+  .srow label { color: rgba(255,255,255,.78); }
+  .srow select, .srow button {
+    appearance: none; border: 1px solid rgba(255,255,255,.16); border-radius: 6px;
+    background: rgba(255,255,255,.08); color: #fff; padding: 2px 6px; font-size: 12px;
+  }
+  .srow input[type="checkbox"] { width: 15px; height: 15px; accent-color: #7aa2ff; }
+  .sbtns { display: flex; gap: 5px; }
+  @media (prefers-reduced-motion: reduce) { * { animation: none !important; transition: none !important; } }
+</style>
+</head>
+<body>
+<div id="stage">
+  <div id="card" class="notice">
+    <div id="grip"></div>
+    <div id="meta">
+      <span id="title">同步字幕</span>
+      <span id="status">连接中</span>
+      <span id="time"></span>
+    </div>
+    <div id="lines">
+      <div id="en"></div>
+      <div id="zh">等待同步服务…</div>
+    </div>
+    <div id="bottom">
+      <div id="progress"><i></i></div>
+      <div id="tools">
+        <button data-act="prev" title="上一句 / 重听">
+          <svg viewBox="0 0 24 24"><path d="M15 6l-6 6 6 6"/></svg>
+        </button>
+        <button data-act="play" title="暂停播放">
+          <svg viewBox="0 0 24 24"><path d="M9 5v14M15 5v14"/></svg>
+        </button>
+        <button data-act="next" title="下一句">
+          <svg viewBox="0 0 24 24"><path d="M9 6l6 6-6 6"/></svg>
+        </button>
+        <span class="sep"></span>
+        <button data-act="mode" class="text" title="切换字幕显示">逐词</button>
+        <button data-act="rate" class="text" title="播放倍速">1x</button>
+        <span class="sep"></span>
+        <button data-act="bg" class="text" title="背景浓度">背景</button>
+        <button data-act="settings" title="设置">
+          <svg viewBox="0 0 24 24"><path d="M12 8.5a3.5 3.5 0 100 7 3.5 3.5 0 000-7z"/><path d="M19.4 15a1.7 1.7 0 00.34 1.88l.06.06a2 2 0 11-2.83 2.83l-.06-.06A1.7 1.7 0 0015 19.4a1.7 1.7 0 00-1 1.56V21a2 2 0 11-4 0v-.06A1.7 1.7 0 009 19.4a1.7 1.7 0 00-1.88.34l-.06.06a2 2 0 11-2.83-2.83l.06-.06A1.7 1.7 0 004.6 15a1.7 1.7 0 00-1.56-1H3a2 2 0 110-4h.06A1.7 1.7 0 004.6 9a1.7 1.7 0 00-.34-1.88l-.06-.06a2 2 0 112.83-2.83l.06.06A1.7 1.7 0 009 4.6a1.7 1.7 0 001-1.56V3a2 2 0 114 0v.06A1.7 1.7 0 0015 4.6a1.7 1.7 0 001.88-.34l.06-.06a2 2 0 112.83 2.83l-.06.06A1.7 1.7 0 0019.4 9c.25.6.84 1 1.54 1H21a2 2 0 110 4h-.06a1.7 1.7 0 00-1.54 1z"/></svg>
+        </button>
+        <span class="sep"></span>
+        <button data-act="smaller" title="缩小字号">A−</button>
+        <button data-act="larger" title="放大字号">A+</button>
+        <span class="sep"></span>
+        <button data-act="hide" title="隐藏字幕条">
+          <svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18"/></svg>
+        </button>
+      </div>
+    </div>
+    <div id="settings">
+      <div class="shead"><span>字幕设置</span><button data-act="close-settings">完成</button></div>
+      <div class="srow"><label for="set-panel">窗口高度</label><select id="set-panel"><option value="168">紧凑</option><option value="200">舒适</option><option value="240">高</option></select></div>
+      <div class="srow"><label for="set-mode">显示模式</label><select id="set-mode"><option value="bi">双语</option><option value="en">原文</option><option value="zh">译文</option><option value="align">逐词</option></select></div>
+      <div class="srow"><label for="set-bg">背景浓度</label><select id="set-bg"><option value="0">无</option><option value="1">轻</option><option value="2">标准</option><option value="3">强</option></select></div>
+      <div class="srow"><label for="set-rate">倍速</label><select id="set-rate"><option value="0.5">0.5x</option><option value="0.75">0.75x</option><option value="1">1x</option><option value="1.25">1.25x</option><option value="1.5">1.5x</option><option value="2">2x</option></select></div>
+      <div class="srow"><label for="set-rate-auto">记住并应用倍速</label><input id="set-rate-auto" type="checkbox"></div>
+      <div class="srow"><label for="set-hover-pause">悬停单词暂停</label><input id="set-hover-pause" type="checkbox"></div>
+      <div class="srow"><label for="set-auto-resume">离开后继续播放</label><input id="set-auto-resume" type="checkbox"></div>
+      <div class="srow"><label for="set-underline">单词下划线</label><input id="set-underline" type="checkbox"></div>
+      <div class="srow"><label for="set-tools">工具栏常显</label><input id="set-tools" type="checkbox"></div>
+      <div class="srow"><label for="set-lyric">歌词进度</label><input id="set-lyric" type="checkbox"></div>
+      <div class="srow"><label for="set-progress">显示进度条</label><input id="set-progress" type="checkbox"></div>
+      <div class="srow"><label for="set-dim">暂停时变暗</label><input id="set-dim" type="checkbox"></div>
+      <div class="srow"><label>导出本课</label><span class="sbtns"><button data-act="export-srt">SRT</button><button data-act="export-md">MD</button></span></div>
+    </div>
+  </div>
+  <div id="tip"></div>
+</div>
+<script>
+  const $ = (selector) => document.querySelector(selector);
+  const card = $("#card");
+  const enLine = $("#en");
+  const zhLine = $("#zh");
+  const titleLine = $("#title");
+  const statusLine = $("#status");
+  const timeLine = $("#time");
+  const progressBar = $("#progress i");
+  const tip = $("#tip");
+  const WORD_RE = /[A-Za-z]+(?:['’\-][A-Za-z]+)*/g;
+  let state = null;
+  let lastIdx = -1;
+  let enText = "";
+  let tipWord = null;
+  let pinnedWord = null;
+  let tipSeq = 0;
+  let drag = null;
+  let suppressClickUntil = 0;
+  const DRAG_THRESHOLD = 3;
+  const dictCache = new Map();
+  const alignCache = new Map();
+  let alignIdx = -1;
+  let alignLoading = false;
+  let zhSize = Number(localStorage.getItem("ting-zh-size") || 21);
+
+  const native = (message) => window.webkit?.messageHandlers?.sync?.postMessage(message);
+  const playButton = document.querySelector('#tools [data-act="play"]');
+  const modeButton = document.querySelector('#tools [data-act="mode"]');
+  const rateButton = document.querySelector('#tools [data-act="rate"]');
+  const bgButton = document.querySelector('#tools [data-act="bg"]');
+  const PLAY_SVG = '<svg viewBox="0 0 24 24"><path d="M8 5l11 7-11 7z"/></svg>';
+  const PAUSE_SVG = '<svg viewBox="0 0 24 24"><path d="M9 5v14M15 5v14"/></svg>';
+  const MODES = ["bi", "en", "zh", "align"];
+  const MODE_LABELS = { bi: "双语", en: "原文", zh: "译文", align: "逐词" };
+  const BG_LEVELS = [0, 0.55, 0.76, 0.92];
+  const BG_LABELS = ["无", "轻", "标准", "高对比"];
+  const RATES = [0.5, 0.75, 1, 1.25, 1.5, 2];
+  const PANEL_HEIGHTS = [168, 200, 240];
+  const storedBg = localStorage.getItem("ting-bg");
+  const storedPanel = Number(localStorage.getItem("ting-panel-height"));
+  const storedRate = Number(localStorage.getItem("ting-rate"));
+  let mode = localStorage.getItem("ting-mode") || "align";
+  if (!localStorage.getItem("ting-ui-v2")) {
+    mode = "align";
+    localStorage.setItem("ting-ui-v2", "1");
+  }
+  let bgIndex = storedBg === null ? 2 : Number(storedBg);
+  let desiredRate = RATES.includes(storedRate) ? storedRate : 1;
+  let rateAutoPending = false;
+  let preferredPanelHeight = PANEL_HEIGHTS.includes(storedPanel) ? storedPanel : 200;
+  let currentPanelHeight = preferredPanelHeight;
+  let textScale = 1;
+  let lastFitKey = "";
+  const MAX_PANEL_HEIGHT = 320;
+  let settings = {
+    hoverPause: localStorage.getItem("ting-hover-pause") !== "0",
+    autoResume: localStorage.getItem("ting-auto-resume") !== "0",
+    wordUnderline: localStorage.getItem("ting-word-underline") !== "0",
+    alwaysTools: localStorage.getItem("ting-always-tools") === "1",
+    lyricProgress: localStorage.getItem("ting-lyric-progress") !== "0",
+    rateAuto: localStorage.getItem("ting-rate-auto") !== "0",
+    showProgress: localStorage.getItem("ting-show-progress") !== "0",
+    dimPaused: localStorage.getItem("ting-dim-paused") === "1",
+  };
+  if (!MODES.includes(mode)) mode = "bi";
+  if (!Number.isInteger(bgIndex) || bgIndex < 0 || bgIndex >= BG_LEVELS.length) bgIndex = 2;
+
+  const GLOBAL_SHORTCUT_NAMES = ["toggleSubtitle", "toggleSettings"];
+  const DEFAULT_SHORTCUTS = {
+    toggleSubtitle: { key: "b", keyCode: 66, modifiers: 256 },
+    toggleSettings: { key: "s", keyCode: 19, modifiers: 768 },
+    play: { key: " ", keyCode: 32, modifiers: 0 },
+    prev: { key: "arrowleft", keyCode: 37, modifiers: 0 },
+    next: { key: "arrowright", keyCode: 39, modifiers: 0 },
+    mode: { key: "m", keyCode: 46, modifiers: 0 },
+    bg: { key: "b", keyCode: 66, modifiers: 0 },
+    speedUp: { key: "]", keyCode: 221, modifiers: 0 },
+    speedDown: { key: "[", keyCode: 219, modifiers: 0 },
+    fontUp: { key: "+", keyCode: 187, modifiers: 512 },
+    fontDown: { key: "-", keyCode: 189, modifiers: 0 },
+    settings: { key: ",", keyCode: 188, modifiers: 0 },
+  };
+  function loadShortcuts() {
+    try {
+      const stored = JSON.parse(localStorage.getItem("ting-shortcuts") || "{}");
+      const merged = {};
+      for (const name of Object.keys(DEFAULT_SHORTCUTS)) {
+        merged[name] = { ...DEFAULT_SHORTCUTS[name], ...(stored[name] || {}) };
+      }
+      return merged;
+    } catch {
+      return JSON.parse(JSON.stringify(DEFAULT_SHORTCUTS));
+    }
+  }
+  let shortcuts = loadShortcuts();
+
+  function setPanelHeight(height, notify = true) {
+    const target = Math.max(168, Math.min(MAX_PANEL_HEIGHT, Math.ceil(Number(height) || 200)));
+    currentPanelHeight = target;
+    document.documentElement.style.setProperty("--panel-height", `${target}px`);
+    document.documentElement.style.setProperty("--card-height", `${Math.max(144, target - 24)}px`);
+    if (notify) native({ action: "setBaseHeight", height: target });
+  }
+
+  function syncShortcutsToNative() {
+    const payload = {};
+    for (const name of GLOBAL_SHORTCUT_NAMES) {
+      const sc = shortcuts[name];
+      if (sc) payload[name] = { keyCode: sc.keyCode || 0, modifiers: sc.modifiers || 0 };
+    }
+    native({ action: "setShortcuts", shortcuts: payload });
+  }
+
+  function setPreferredPanelHeight(height) {
+    const target = PANEL_HEIGHTS.includes(Number(height)) ? Number(height) : 200;
+    preferredPanelHeight = target;
+    localStorage.setItem("ting-panel-height", String(target));
+    setPanelHeight(target);
+    fitPanelToContent(true);
+  }
+
+  function saveSettings() {
+    localStorage.setItem("ting-hover-pause", settings.hoverPause ? "1" : "0");
+    localStorage.setItem("ting-auto-resume", settings.autoResume ? "1" : "0");
+    localStorage.setItem("ting-word-underline", settings.wordUnderline ? "1" : "0");
+    localStorage.setItem("ting-always-tools", settings.alwaysTools ? "1" : "0");
+    localStorage.setItem("ting-lyric-progress", settings.lyricProgress ? "1" : "0");
+    localStorage.setItem("ting-rate-auto", settings.rateAuto ? "1" : "0");
+    localStorage.setItem("ting-show-progress", settings.showProgress ? "1" : "0");
+    localStorage.setItem("ting-dim-paused", settings.dimPaused ? "1" : "0");
+  }
+
+  function applySettings() {
+    card.classList.toggle("no-underline", !settings.wordUnderline);
+    card.classList.toggle("tools-always", settings.alwaysTools);
+    card.classList.toggle("lyric", settings.lyricProgress);
+    $("#progress").style.display = settings.showProgress ? "" : "none";
+    $("#set-panel").value = String(preferredPanelHeight);
+    $("#set-mode").value = mode;
+    $("#set-bg").value = String(bgIndex);
+    $("#set-rate").value = String(desiredRate);
+    $("#set-hover-pause").checked = settings.hoverPause;
+    $("#set-auto-resume").checked = settings.autoResume;
+    $("#set-underline").checked = settings.wordUnderline;
+    $("#set-tools").checked = settings.alwaysTools;
+    $("#set-lyric").checked = settings.lyricProgress;
+    $("#set-rate-auto").checked = settings.rateAuto;
+    $("#set-progress").checked = settings.showProgress;
+    $("#set-dim").checked = settings.dimPaused;
+  }
+
+  function applyMode() {
+    card.classList.remove("mode-bi", "mode-en", "mode-zh", "mode-align");
+    card.classList.add(`mode-${mode}`);
+    modeButton.textContent = MODE_LABELS[mode];
+    modeButton.title = `字幕显示：${MODE_LABELS[mode]}（点击切换）`;
+    localStorage.setItem("ting-mode", mode);
+  }
+
+  function applyBg() {
+    document.documentElement.style.setProperty("--bg-alpha", String(BG_LEVELS[bgIndex]));
+    bgButton.title = `背景：${BG_LABELS[bgIndex]}（点击切换）`;
+    localStorage.setItem("ting-bg", String(bgIndex));
+  }
+
+  function formatRate(rate) {
+    const value = Number(rate) || 1;
+    return `${String(Number(value.toFixed(2)))}x`;
+  }
+
+  function updateRateButton(rate) {
+    const value = RATES.includes(Number(rate)) ? Number(rate) : Number(rate || 1);
+    rateButton.textContent = formatRate(value);
+    rateButton.title = `播放倍速：${formatRate(value)}（点击切换）`;
+    $("#set-rate").value = RATES.includes(Number(rate)) ? String(rate) : "1";
+  }
+
+  async function setRate(rate) {
+    const value = Number(rate);
+    if (!RATES.includes(value)) return false;
+    desiredRate = value;
+    localStorage.setItem("ting-rate", String(value));
+    updateRateButton(value);
+    try {
+      const response = await fetch("/playback", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ rate: value }),
+      });
+      const data = await response.json();
+      if (data?.ok && state) {
+        state.rate = data.rate || value;
+        render(state);
+      }
+      return Boolean(data?.ok);
+    } catch {
+      return false;
+    }
+  }
+
+  function cycleRate() {
+    const current = Number(state?.rate || desiredRate);
+    const index = RATES.indexOf(current);
+    setRate(RATES[(index + 1) % RATES.length]);
+  }
+
+  function maybeApplySavedRate() {
+    if (!settings.rateAuto || !rateAutoPending || !state || state.status !== "ready") return;
+    rateAutoPending = false;
+    if (Math.abs((Number(state.rate) || 1) - desiredRate) > 0.01) setRate(desiredRate);
+  }
+
+  function updatePlayButton(paused) {
+    playButton.innerHTML = paused ? PLAY_SVG : PAUSE_SVG;
+    playButton.title = paused ? "继续播放" : "暂停播放";
+  }
+
+  let autoPausedByHover = false;
+  let hoverPauseTimer = 0;
+  let hoverResumeTimer = 0;
+
+  async function setPlayback(paused) {
+    try {
+      const response = await fetch("/playback", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ paused: Boolean(paused) }),
+      });
+      const data = await response.json();
+      if (data?.ok && state) {
+        state.paused = data.paused;
+        render(state);
+      }
+      return Boolean(data?.ok);
+    } catch {
+      return false;
+    }
+  }
+
+  async function togglePlayback() {
+    await setPlayback(state ? !state.paused : true);
+  }
+
+  function scheduleHoverPause() {
+    if (!settings.hoverPause) return;
+    clearTimeout(hoverResumeTimer);
+    clearTimeout(hoverPauseTimer);
+    hoverPauseTimer = setTimeout(async () => {
+      if (!state || state.paused || autoPausedByHover) return;
+      const ok = await setPlayback(true);
+      if (ok) autoPausedByHover = true;
+    }, 120);
+  }
+
+  function scheduleHoverResume() {
+    clearTimeout(hoverPauseTimer);
+    if (!autoPausedByHover || !settings.autoResume) return;
+    clearTimeout(hoverResumeTimer);
+    hoverResumeTimer = setTimeout(async () => {
+      if (tipWord || !autoPausedByHover) return;
+      const ok = await setPlayback(false);
+      if (ok) autoPausedByHover = false;
+    }, 350);
+  }
+
+  applyMode();
+  applyBg();
+  setPanelHeight(preferredPanelHeight);
+  applySettings();
+  syncShortcutsToNative();
+  rateAutoPending = settings.rateAuto;
+  updatePlayButton(true);
+  updateRateButton(desiredRate);
+
+  const wordKey = (word) => word.toLowerCase().replace(/’/g, "'");
+  const alignColor = (index) => `hsl(${(index * 137.508) % 360} 78% 58%)`;
+
+  function hideTip(force = false) {
+    if (pinnedWord && !force) return;
+    tipSeq += 1;
+    tip.classList.remove("show", "pinned");
+    if (tipWord) tipWord.classList.remove("on");
+    tipWord = null;
+    pinnedWord = null;
+    scheduleHoverResume();
+  }
+
+  function positionTip(word) {
+    const rect = word.getBoundingClientRect();
+    const box = tip.getBoundingClientRect();
+    const left = Math.min(Math.max(6, rect.left), window.innerWidth - box.width - 6);
+    let top = rect.top - box.height - 6;
+    if (top < 4) top = Math.min(rect.bottom + 6, window.innerHeight - box.height - 4);
+    tip.style.left = left + "px";
+    tip.style.top = Math.max(4, top) + "px";
+  }
+
+  function paintTip(word, entry) {
+    const key = word.dataset.key;
+    const zh = entry?.zh || state?.words?.[key] || "";
+    tip.textContent = "";
+    const label = document.createElement("b");
+    label.textContent = word.textContent;
+    tip.appendChild(label);
+    tip.appendChild(document.createTextNode(zh || (entry ? "" : "查询中…")));
+    tip.classList.toggle("pending", !zh && !entry);
+    for (const def of entry?.defs || []) {
+      const line = document.createElement("span");
+      line.className = "def";
+      if (def.pos) {
+        const em = document.createElement("em");
+        em.textContent = def.pos;
+        line.appendChild(em);
+      }
+      line.appendChild(document.createTextNode(def.text));
+      tip.appendChild(line);
+    }
+    tip.classList.add("show");
+    positionTip(word);
+  }
+
+  async function fetchTip(word, seq) {
+    const key = word.dataset.key;
+    try {
+      const response = await fetch(`/word?w=${encodeURIComponent(key)}`);
+      if (!response.ok) return;
+      const data = await response.json();
+      if (!data?.ok) return;
+      dictCache.set(key, data);
+      if (seq === tipSeq && tipWord === word) {
+        paintTip(word, data);
+        if (pinnedWord === word) {
+          tip.classList.add("pinned");
+          renderTipActions(word);
+        }
+      }
+    } catch {}
+  }
+
+  function renderTipActions(word) {
+    const actions = document.createElement("div");
+    actions.className = "actions";
+    const make = (label, title, handler) => {
+      const button = document.createElement("button");
+      button.textContent = label;
+      button.title = title;
+      button.addEventListener("click", async (event) => {
+        event.stopPropagation();
+        await handler();
+      });
+      actions.appendChild(button);
+    };
+    make("复制词", "复制这个单词", () => native({ action: "copy", text: word.textContent }));
+    make("复制句", "复制当前英文句和译文", () => native({ action: "copy", text: `${state?.en || word.textContent}\n${state?.zh || ""}`.trim() }));
+    make("收藏", "加入生词本", async () => {
+      try {
+        await fetch("/vocab", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ word: word.textContent, sentence: state?.en || "", translation: state?.zh || "" }),
+        });
+        buttonFeedback(button, "已收藏");
+      } catch {
+        buttonFeedback(button, "失败");
+      }
+    });
+    tip.appendChild(actions);
+    positionTip(word);
+  }
+
+  function buttonFeedback(button, text) {
+    const old = button.textContent;
+    button.textContent = text;
+    setTimeout(() => { button.textContent = old; }, 900);
+  }
+
+  function showTip(word, pin = false) {
+    if (pinnedWord && pinnedWord !== word) return;
+    if (tipWord === word && tip.classList.contains("show")) {
+      if (pin && pinnedWord !== word) {
+        pinnedWord = word;
+        tip.classList.add("pinned");
+        renderTipActions(word);
+      }
+      positionTip(word);
+      return;
+    }
+    if (tipWord) tipWord.classList.remove("on");
+    tipWord = word;
+    word.classList.add("on");
+    const cached = dictCache.get(word.dataset.key);
+    paintTip(word, cached);
+    if (pin) {
+      pinnedWord = word;
+      tip.classList.add("pinned");
+      renderTipActions(word);
+    }
+    const seq = ++tipSeq;
+    if (!cached) fetchTip(word, seq);
+  }
+
+  function renderEnglish(text, words) {
+    if (text !== enText) {
+      enText = text;
+      hideTip(true);
+      enLine.textContent = "";
+      if (text) {
+        WORD_RE.lastIndex = 0;
+        let last = 0;
+        let match;
+        let tokenIndex = 0;
+        while ((match = WORD_RE.exec(text))) {
+          if (match.index > last) {
+            enLine.appendChild(document.createTextNode(text.slice(last, match.index)));
+          }
+          const span = document.createElement("span");
+          span.className = "w";
+          span.textContent = match[0];
+          span.dataset.key = wordKey(match[0]);
+          span.style.setProperty("--uc", alignColor(tokenIndex));
+          tokenIndex += 1;
+          enLine.appendChild(span);
+          last = match.index + match[0].length;
+        }
+        if (last < text.length) enLine.appendChild(document.createTextNode(text.slice(last)));
+      }
+    }
+    for (const span of enLine.querySelectorAll(".w")) {
+      span.classList.toggle("missing", !words?.[span.dataset.key]);
+    }
+  }
+
+  enLine.addEventListener("mouseover", (event) => {
+    if (drag?.active) return;
+    const word = event.target.closest(".w");
+    if (!word) return;
+    showTip(word);
+    scheduleHoverPause();
+  });
+  enLine.addEventListener("mouseout", (event) => {
+    const word = event.target.closest(".w");
+    if (!word) return;
+    if (event.relatedTarget && word.contains(event.relatedTarget)) return;
+    hideTip();
+  });
+  enLine.addEventListener("click", (event) => {
+    if (Date.now() < suppressClickUntil) return;
+    const word = event.target.closest(".w");
+    if (!word) return;
+    event.stopPropagation();
+    if (pinnedWord === word) hideTip(true);
+    else showTip(word, true);
+  });
+  document.addEventListener("click", (event) => {
+    if (Date.now() < suppressClickUntil) return;
+    if (pinnedWord && event.target.closest("#tip")) return;
+    if (!event.target.closest(".w")) hideTip(true);
+  });
+
+  document.addEventListener("pointerdown", (event) => {
+    if (event.button !== 0 || event.target.closest('#tools button, #settings select, #settings input, #settings button')) return;
+    drag = {
+      id: event.pointerId,
+      x: event.screenX,
+      y: event.screenY,
+      dx: 0,
+      dy: 0,
+      active: false,
+    };
+  });
+
+  document.addEventListener("pointermove", (event) => {
+    if (!drag || event.pointerId !== drag.id) return;
+    const dx = event.screenX - drag.x;
+    const dy = event.screenY - drag.y;
+    if (!drag.active) {
+      if (Math.hypot(dx, dy) < DRAG_THRESHOLD) return;
+      drag.active = true;
+      document.body.classList.add("dragging");
+      try { document.documentElement.setPointerCapture(event.pointerId); } catch {}
+      hideTip(true);
+      native({ action: "dragStart" });
+    }
+    drag.dx = dx;
+    drag.dy = dy;
+    native({ action: "dragMove", dx, dy });
+  });
+
+  function endDrag(event) {
+    if (!drag || (event && event.pointerId !== drag.id)) return;
+    if (drag.active) {
+      native({ action: "dragEnd" });
+      document.body.classList.remove("dragging");
+      suppressClickUntil = Date.now() + 250;
+    }
+    drag = null;
+  }
+  document.addEventListener("pointerup", endDrag);
+  document.addEventListener("pointercancel", endDrag);
+
+  function applySize() {
+    zhSize = Math.min(30, Math.max(14, zhSize));
+    const zh = Math.max(12, zhSize * textScale);
+    const en = Math.max(10, zh * 0.72);
+    document.documentElement.style.setProperty("--zh-size", zh.toFixed(2) + "px");
+    document.documentElement.style.setProperty("--en-size", en.toFixed(2) + "px");
+    localStorage.setItem("ting-zh-size", String(zhSize));
+  }
+  applySize();
+
+  function fmt(seconds) {
+    const s = Math.max(0, Number(seconds) || 0);
+    const h = Math.floor(s / 3600);
+    const m = Math.floor((s % 3600) / 60);
+    const r = Math.floor(s % 60);
+    return h > 0
+      ? `${h}:${String(m).padStart(2, "0")}:${String(r).padStart(2, "0")}`
+      : `${String(m).padStart(2, "0")}:${String(r).padStart(2, "0")}`;
+  }
+
+  function swap() {
+    card.classList.remove("swap");
+    void card.offsetWidth;
+    card.classList.add("swap");
+    setTimeout(() => card.classList.remove("swap"), 300);
+  }
+
+  function notice(message, status) {
+    card.classList.add("notice");
+    card.classList.remove("dim");
+    statusLine.textContent = status || "等待";
+    updatePlayButton(true);
+    updateRateButton(state?.rate || desiredRate);
+    titleLine.textContent = state?.title || "同步字幕";
+    timeLine.textContent = "";
+    enText = "";
+    enLine.textContent = "";
+    hideTip(true);
+    zhLine.textContent = message;
+    zhLine.classList.remove("pending");
+    progressBar.style.width = "0%";
+  }
+
+  function renderAlignedChinese(entry) {
+    zhLine.textContent = "";
+    zhLine.classList.remove("pending");
+    const words = [...enLine.querySelectorAll(".w")];
+    const parts = entry?.parts || [];
+    const segments = Array.isArray(entry?.segments) && entry.segments.length
+      ? entry.segments
+      : parts.map((text, i) => ({ i, text }));
+    let rendered = 0;
+    for (const segment of segments) {
+      const text = String(segment.text || "").trim();
+      if (!text) continue;
+      const span = document.createElement("span");
+      span.className = "a";
+      if (Number.isInteger(segment.i)) {
+        span.style.setProperty("--uc", alignColor(segment.i));
+      } else {
+        span.classList.add("neutral");
+      }
+      span.textContent = text;
+      zhLine.appendChild(span);
+      zhLine.appendChild(document.createTextNode(" "));
+      rendered += 1;
+    }
+    if (rendered) return;
+    for (let i = 0; i < words.length; i += 1) {
+      const fallback = state?.words?.[words[i].dataset.key] || parts[i] || "";
+      if (!fallback) continue;
+      const span = document.createElement("span");
+      span.className = "a empty";
+      span.style.setProperty("--uc", alignColor(i));
+      span.textContent = fallback;
+      zhLine.appendChild(span);
+      zhLine.appendChild(document.createTextNode(" "));
+      rendered += 1;
+    }
+    if (!rendered) zhLine.textContent = "没有拿到逐词对照";
+    fitPanelToContent(true);
+  }
+
+  async function requestAlign(idx) {
+    if (alignCache.has(idx)) {
+      renderAlignedChinese(alignCache.get(idx));
+      return;
+    }
+    if (alignLoading && alignIdx === idx) return;
+    alignLoading = true;
+    alignIdx = idx;
+    try {
+      const response = await fetch(`/align?idx=${encodeURIComponent(idx)}`);
+      const data = await response.json();
+      if (data?.ok && (Array.isArray(data.parts) || Array.isArray(data.segments))) {
+        const entry = { parts: data.parts || [], segments: data.segments || [] };
+        alignCache.set(idx, entry);
+        if (state?.idx === idx && mode === "align") renderAlignedChinese(entry);
+      } else if (state?.idx === idx && mode === "align") {
+        zhLine.textContent = "逐词暂不可用";
+      }
+    } catch {
+      if (state?.idx === idx && mode === "align") zhLine.textContent = "逐词暂不可用";
+    } finally {
+      alignLoading = false;
+    }
+  }
+
+  function applyProgressToSpans(spans, ratio) {
+    const lengths = spans.map((span) => Math.max(1, span.textContent.length));
+    const total = lengths.reduce((sum, length) => sum + length, 0);
+    let acc = 0;
+    spans.forEach((span, index) => {
+      const length = lengths[index];
+      const center = acc + length / 2;
+      acc += length;
+      const sung = !settings.lyricProgress || (total ? center / total <= ratio : true);
+      span.classList.toggle("sung", sung);
+    });
+  }
+
+  function updateLyricProgress(next) {
+    const duration = next.cueEnd - next.cueStart;
+    const ratio = settings.lyricProgress && duration > 0
+      ? Math.max(0, Math.min(1, (next.t - next.cueStart) / duration))
+      : 1;
+    applyProgressToSpans([...enLine.querySelectorAll(".w")], ratio);
+    applyProgressToSpans([...zhLine.querySelectorAll(".a")], ratio);
+  }
+
+  function fitPanelToContent(force = false) {
+    if (!state || state.status !== "ready") return;
+    const key = `${state.idx}|${mode}|${zhSize}|${preferredPanelHeight}|${settings.wordUnderline ? 1 : 0}`;
+    if (!force && key === lastFitKey) return;
+    lastFitKey = key;
+    textScale = 1;
+    applySize();
+    const natural = Math.ceil(card.scrollHeight + 24);
+    const target = Math.min(MAX_PANEL_HEIGHT, Math.max(preferredPanelHeight, natural));
+    setPanelHeight(target);
+    let guard = 0;
+    while (Math.ceil(card.scrollHeight + 24) > target + 2 && textScale > 0.74 && guard < 8) {
+      textScale *= 0.92;
+      applySize();
+      guard += 1;
+    }
+  }
+
+  function render(next) {
+    state = next;
+    if (!next || next.status !== "ready" || !next.en) {
+      const messages = {
+        booting: "同步服务启动中…",
+        "waiting-app": "等待每日英语听力启动…",
+        "app-no-debug": "请用「每日英语听力·同步」图标启动 App",
+        "waiting-video": "等待音频开始播放…",
+        "waiting-cues": "等待课文页…",
+        "stale-cues": "正在切换课文…",
+        error: next?.message || "同步出错",
+      };
+      const labels = {
+        "waiting-app": "等待中",
+        "app-no-debug": "待重启",
+        "waiting-video": "等待播放",
+        "waiting-cues": "等待课文",
+        "stale-cues": "切换中",
+        booting: "启动中",
+        error: "出错",
+      };
+      notice(next?.message || messages[next?.status] || "等待同步…", labels[next?.status]);
+      return;
+    }
+
+    card.classList.remove("notice");
+    card.classList.toggle("dim", settings.dimPaused && Boolean(next.paused));
+    if (!next.paused && autoPausedByHover) autoPausedByHover = false;
+    titleLine.textContent = next.title || "同步字幕";
+    statusLine.textContent = next.paused ? "已暂停" : "同步中";
+    updatePlayButton(Boolean(next.paused));
+    updateRateButton(Number(next.rate) || 1);
+    maybeApplySavedRate();
+    timeLine.textContent = next.d ? `${fmt(next.t)} / ${fmt(next.d)}` : fmt(next.t);
+    renderEnglish(next.en, next.words);
+    if (mode === "align") {
+      if (alignCache.has(next.idx)) {
+        renderAlignedChinese(alignCache.get(next.idx));
+      } else {
+        zhLine.innerHTML = '逐词加载中<span class="dots"></span>';
+        zhLine.classList.remove("pending");
+        requestAlign(next.idx);
+      }
+    } else if (next.zh) {
+      zhLine.textContent = next.zh;
+      zhLine.classList.remove("pending");
+    } else {
+      zhLine.innerHTML = '译文中<span class="dots"></span>';
+      zhLine.classList.add("pending");
+    }
+    const span = next.cueEnd - next.cueStart;
+    const ratio = span > 0 ? Math.max(0, Math.min(1, (next.t - next.cueStart) / span)) : 0;
+    progressBar.style.width = (ratio * 100).toFixed(1) + "%";
+    updateLyricProgress(next);
+    fitPanelToContent();
+    if (next.idx !== lastIdx) {
+      lastIdx = next.idx;
+      swap();
+    }
+  }
+
+  async function seek(payload) {
+    try {
+      await fetch("/seek", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      });
+    } catch {}
+  }
+
+  document.querySelectorAll("#tools button").forEach((button) => {
+    button.addEventListener("click", (event) => {
+      event.stopPropagation();
+      const action = button.dataset.act;
+      if (action === "prev" && state) {
+        if (state.t - state.cueStart > 3) seek({ t: state.cueStart });
+        else seek({ idx: Math.max(0, state.idx - 1) });
+      } else if (action === "next" && state) {
+        seek({ idx: Math.min((state.cueCount || 1) - 1, state.idx + 1) });
+      } else if (action === "play") {
+        togglePlayback();
+      } else if (action === "mode") {
+        cycleMode();
+      } else if (action === "rate") {
+        cycleRate();
+      } else if (action === "bg") {
+        cycleBg();
+      } else if (action === "settings") {
+        toggleSettings();
+      } else if (action === "smaller") {
+        zhSize -= 1;
+        applySize();
+        fitPanelToContent(true);
+      } else if (action === "larger") {
+        zhSize += 1;
+        applySize();
+        fitPanelToContent(true);
+      } else if (action === "hide") {
+        native({ action: "hide" });
+      }
+    });
+  });
+
+  document.querySelector('[data-act="close-settings"]').addEventListener("click", (event) => {
+    event.stopPropagation();
+    card.classList.remove("settings");
+  });
+
+  $("#set-panel").addEventListener("change", (event) => {
+    setPreferredPanelHeight(Number(event.target.value));
+    applySettings();
+  });
+  $("#set-mode").addEventListener("change", (event) => {
+    mode = event.target.value;
+    applyMode();
+    applySettings();
+    if (state) render(state);
+  });
+  $("#set-bg").addEventListener("change", (event) => {
+    bgIndex = Number(event.target.value);
+    applyBg();
+    applySettings();
+  });
+  $("#set-rate").addEventListener("change", (event) => {
+    setRate(Number(event.target.value));
+  });
+  $("#set-rate-auto").addEventListener("change", (event) => {
+    settings.rateAuto = event.target.checked;
+    saveSettings();
+    if (settings.rateAuto) rateAutoPending = true;
+    applySettings();
+  });
+  $("#set-hover-pause").addEventListener("change", (event) => {
+    settings.hoverPause = event.target.checked;
+    saveSettings();
+  });
+  $("#set-auto-resume").addEventListener("change", (event) => {
+    settings.autoResume = event.target.checked;
+    saveSettings();
+    if (!settings.autoResume) autoPausedByHover = false;
+  });
+  $("#set-underline").addEventListener("change", (event) => {
+    settings.wordUnderline = event.target.checked;
+    saveSettings();
+    applySettings();
+  });
+  $("#set-tools").addEventListener("change", (event) => {
+    settings.alwaysTools = event.target.checked;
+    saveSettings();
+    applySettings();
+  });
+  $("#set-lyric").addEventListener("change", (event) => {
+    settings.lyricProgress = event.target.checked;
+    saveSettings();
+    applySettings();
+    if (state) render(state);
+  });
+  $("#set-progress").addEventListener("change", (event) => {
+    settings.showProgress = event.target.checked;
+    saveSettings();
+    applySettings();
+  });
+  $("#set-dim").addEventListener("change", (event) => {
+    settings.dimPaused = event.target.checked;
+    saveSettings();
+    if (state) render(state);
+  });
+
+  document.querySelectorAll('#settings [data-act^="export-"]').forEach((button) => {
+    button.addEventListener("click", (event) => {
+      event.stopPropagation();
+      const format = button.dataset.act === "export-md" ? "md" : "srt";
+      const link = document.createElement("a");
+      link.href = `/export?format=${format}`;
+      link.download = "";
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+    });
+  });
+
+  document.addEventListener("pointerdown", (event) => {
+    if (card.classList.contains("settings") && !event.target.closest("#settings, [data-act='settings']")) {
+      card.classList.remove("settings");
+    }
+  });
+
+  function cycleMode() {
+    mode = MODES[(MODES.indexOf(mode) + 1) % MODES.length];
+    applyMode();
+    applySettings();
+    if (state) render(state);
+  }
+
+  function cycleBg() {
+    bgIndex = (bgIndex + 1) % BG_LEVELS.length;
+    applyBg();
+    applySettings();
+  }
+
+  function toggleSettings() {
+    native({ action: "toggleSettings" });
+  }
+
+  function shortcutModifiers(event) {
+    return (event.metaKey ? 256 : 0)
+      | (event.ctrlKey ? 4096 : 0)
+      | (event.altKey ? 2048 : 0)
+      | (event.shiftKey ? 512 : 0);
+  }
+
+  function matchesShortcut(event, shortcut) {
+    const key = String(shortcut.key || "").toLowerCase();
+    return key && event.key.toLowerCase() === key && shortcutModifiers(event) === (shortcut.modifiers || 0);
+  }
+
+  function runShortcut(name) {
+    if (name === "play") togglePlayback();
+    else if (name === "prev" && state) seek({ idx: Math.max(0, state.idx - 1) });
+    else if (name === "next" && state) seek({ idx: Math.min((state.cueCount || 1) - 1, state.idx + 1) });
+    else if (name === "mode") cycleMode();
+    else if (name === "bg") cycleBg();
+    else if (name === "settings") toggleSettings();
+    else if (name === "speedUp" && state) {
+      const index = RATES.indexOf(Number(state.rate || desiredRate));
+      setRate(RATES[Math.min(RATES.length - 1, (index < 0 ? 2 : index) + 1)]);
+    } else if (name === "speedDown" && state) {
+      const index = RATES.indexOf(Number(state.rate || desiredRate));
+      setRate(RATES[Math.max(0, (index < 0 ? 2 : index) - 1)]);
+    } else if (name === "fontUp") { zhSize += 1; applySize(); fitPanelToContent(true); }
+    else if (name === "fontDown") { zhSize -= 1; applySize(); fitPanelToContent(true); }
+  }
+
+  document.addEventListener("keydown", (event) => {
+    if (event.target.closest("input, select, button")) return;
+    if (event.key === "Escape") {
+      if (pinnedWord) hideTip(true);
+      else if (card.classList.contains("settings")) card.classList.remove("settings");
+      return;
+    }
+    for (const [name, shortcut] of Object.entries(shortcuts)) {
+      if (GLOBAL_SHORTCUT_NAMES.includes(name)) continue;
+      if (matchesShortcut(event, shortcut)) {
+        event.preventDefault();
+        runShortcut(name);
+        return;
+      }
+    }
+  });
+
+  document.addEventListener("contextmenu", (event) => event.preventDefault());
+
+  let lastReloadToken = localStorage.getItem("ting-reload") || "";
+  function syncFromStorage() {
+    const nextMode = localStorage.getItem("ting-mode") || "align";
+    const nextBg = Number(localStorage.getItem("ting-bg"));
+    const nextPanel = Number(localStorage.getItem("ting-panel-height"));
+    const nextRate = Number(localStorage.getItem("ting-rate"));
+    if (MODES.includes(nextMode)) mode = nextMode;
+    if (Number.isInteger(nextBg) && nextBg >= 0 && nextBg < BG_LEVELS.length) bgIndex = nextBg;
+    if (RATES.includes(nextRate)) desiredRate = nextRate;
+    settings.hoverPause = localStorage.getItem("ting-hover-pause") !== "0";
+    settings.autoResume = localStorage.getItem("ting-auto-resume") !== "0";
+    settings.wordUnderline = localStorage.getItem("ting-word-underline") !== "0";
+    settings.alwaysTools = localStorage.getItem("ting-always-tools") === "1";
+    settings.lyricProgress = localStorage.getItem("ting-lyric-progress") !== "0";
+    settings.showProgress = localStorage.getItem("ting-show-progress") !== "0";
+    settings.rateAuto = localStorage.getItem("ting-rate-auto") !== "0";
+    settings.dimPaused = localStorage.getItem("ting-dim-paused") === "1";
+    shortcuts = loadShortcuts();
+    syncShortcutsToNative();
+    applyMode();
+    applyBg();
+    if (PANEL_HEIGHTS.includes(nextPanel) && nextPanel !== preferredPanelHeight) setPreferredPanelHeight(nextPanel);
+    applySettings();
+    updateRateButton(state?.rate || desiredRate);
+    const reloadToken = localStorage.getItem("ting-reload") || "";
+    if (reloadToken && reloadToken !== lastReloadToken) {
+      lastReloadToken = reloadToken;
+      location.reload();
+      return;
+    }
+    if (state) render(state);
+  }
+  window.addEventListener("storage", syncFromStorage);
+  setInterval(syncFromStorage, 1000);
+
+  let source = null;
+  function connect() {
+    source = new EventSource("/events");
+    source.onopen = () => {
+      if (!state) notice("已连接，等待播放…", "已连接");
+    };
+    source.onmessage = (event) => {
+      try {
+        render(JSON.parse(event.data));
+      } catch {}
+    };
+    source.onerror = () => {
+      notice("同步服务未连接，正在重试…", "离线");
+    };
+  }
+  connect();
+</script>
+</body>
+</html>

@@ -1,0 +1,251 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>同步字幕设置</title>
+<style>
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; min-height: 100vh; background: #111418; color: #fff;
+    font: 14px/1.5 -apple-system, BlinkMacSystemFont, "PingFang SC", "Helvetica Neue", Arial, sans-serif;
+  }
+  header { padding: 18px 22px 10px; border-bottom: 1px solid rgba(255,255,255,.12); }
+  .headrow { display: flex; align-items: center; justify-content: space-between; gap: 16px; }
+  h1 { margin: 0; font-size: 18px; font-weight: 650; }
+  p { margin: 6px 0 0; color: rgba(255,255,255,.64); font-size: 12px; }
+  main { padding: 16px 22px 24px; }
+  section { margin: 0 0 18px; padding: 12px 14px; border: 1px solid rgba(255,255,255,.12); border-radius: 12px; background: rgba(255,255,255,.04); }
+  h2 { margin: 0 0 10px; font-size: 13px; color: #9fb0e8; font-weight: 650; }
+  .row { display: flex; align-items: center; justify-content: space-between; gap: 16px; min-height: 34px; }
+  label { color: rgba(255,255,255,.86); }
+  select, button {
+    appearance: none; border: 1px solid rgba(255,255,255,.18); border-radius: 8px;
+    background: rgba(255,255,255,.08); color: #fff; padding: 5px 9px; font: inherit;
+  }
+  button { cursor: pointer; }
+  button:hover { background: rgba(255,255,255,.16); }
+  input[type="checkbox"] { width: 17px; height: 17px; accent-color: #7aa2ff; }
+  .actions { display: flex; gap: 8px; flex-wrap: wrap; }
+  button.shortcut { min-width: 116px; text-align: center; }
+  button.recording { border-color: #7aa2ff; color: #fff; }
+  .note { color: #7ee7a8; font-size: 12px; margin-top: 8px; min-height: 18px; }
+</style>
+</head>
+<body>
+<header>
+  <div class="headrow"><h1>同步字幕设置</h1><button id="close">关闭</button></div>
+  <p>这里改完会自动保存，字幕条会在 1 秒内同步。</p>
+</header>
+<main>
+  <section>
+    <h2>显示</h2>
+    <div class="row"><label for="mode">显示模式</label><select id="mode"><option value="bi">双语</option><option value="en">原文</option><option value="zh">译文</option><option value="align">逐词</option></select></div>
+    <div class="row"><label for="panel">窗口高度</label><select id="panel"><option value="168">紧凑</option><option value="200">舒适</option><option value="240">高</option></select></div>
+    <div class="row"><label for="bg">背景浓度</label><select id="bg"><option value="0">无</option><option value="1">轻</option><option value="2">标准</option><option value="3">高对比</option></select></div>
+    <div class="row"><label for="underline">单词下划线</label><input id="underline" type="checkbox"></div>
+    <div class="row"><label for="lyric">歌词进度</label><input id="lyric" type="checkbox"></div>
+    <div class="row"><label for="progress">显示进度条</label><input id="progress" type="checkbox"></div>
+    <div class="row"><label for="tools">工具栏常显</label><input id="tools" type="checkbox"></div>
+  </section>
+  <section>
+    <h2>播放</h2>
+    <div class="row"><label for="rate">倍速</label><select id="rate"><option value="0.5">0.5x</option><option value="0.75">0.75x</option><option value="1">1x</option><option value="1.25">1.25x</option><option value="1.5">1.5x</option><option value="2">2x</option></select></div>
+    <div class="row"><label for="rateAuto">记住并应用倍速</label><input id="rateAuto" type="checkbox"></div>
+    <div class="row"><label for="hoverPause">悬停单词暂停</label><input id="hoverPause" type="checkbox"></div>
+    <div class="row"><label for="autoResume">离开后继续播放</label><input id="autoResume" type="checkbox"></div>
+    <div class="row"><label for="dimPaused">暂停时变暗</label><input id="dimPaused" type="checkbox"></div>
+  </section>
+  <section>
+    <h2>快捷键</h2>
+    <div class="row"><label>显示 / 隐藏字幕条</label><button class="shortcut" data-shortcut="toggleSubtitle"></button></div>
+    <div class="row"><label>显示 / 隐藏设置</label><button class="shortcut" data-shortcut="toggleSettings"></button></div>
+    <div class="row"><label>暂停 / 继续</label><button class="shortcut" data-shortcut="play"></button></div>
+    <div class="row"><label>上一句</label><button class="shortcut" data-shortcut="prev"></button></div>
+    <div class="row"><label>下一句</label><button class="shortcut" data-shortcut="next"></button></div>
+    <div class="row"><label>切换显示模式</label><button class="shortcut" data-shortcut="mode"></button></div>
+    <div class="row"><label>切换背景</label><button class="shortcut" data-shortcut="bg"></button></div>
+    <div class="row"><label>倍速 +</label><button class="shortcut" data-shortcut="speedUp"></button></div>
+    <div class="row"><label>倍速 -</label><button class="shortcut" data-shortcut="speedDown"></button></div>
+    <div class="row"><label>字号 +</label><button class="shortcut" data-shortcut="fontUp"></button></div>
+    <div class="row"><label>字号 -</label><button class="shortcut" data-shortcut="fontDown"></button></div>
+    <div class="row"><label>打开设置</label><button class="shortcut" data-shortcut="settings"></button></div>
+    <div class="row"><label>恢复默认快捷键</label><button id="resetShortcuts">重置</button></div>
+  </section>
+  <section>
+    <h2>课文</h2>
+    <div class="row"><label>导出当前课文</label><div class="actions"><button id="exportSrt">SRT</button><button id="exportMd">Markdown</button></div></div>
+    <div class="row"><label>字幕条</label><div class="actions"><button id="reload">重新载入</button></div></div>
+    <div class="note" id="note"></div>
+  </section>
+</main>
+<script>
+  const $ = (id) => document.getElementById(id);
+  const fields = {
+    mode: "ting-mode",
+    panel: "ting-panel-height",
+    bg: "ting-bg",
+    rate: "ting-rate",
+  };
+  const checks = {
+    underline: ["ting-word-underline", true],
+    lyric: ["ting-lyric-progress", true],
+    progress: ["ting-show-progress", true],
+    tools: ["ting-always-tools", false],
+    rateAuto: ["ting-rate-auto", true],
+    hoverPause: ["ting-hover-pause", true],
+    autoResume: ["ting-auto-resume", true],
+    dimPaused: ["ting-dim-paused", false],
+  };
+  let noteTimer = 0;
+  function note(text) {
+    $("note").textContent = text;
+    clearTimeout(noteTimer);
+    noteTimer = setTimeout(() => { $("note").textContent = ""; }, 1500);
+  }
+  const DEFAULT_SHORTCUTS = {
+    toggleSubtitle: { key: "b", keyCode: 66, modifiers: 256 },
+    toggleSettings: { key: "s", keyCode: 19, modifiers: 768 },
+    play: { key: " ", keyCode: 32, modifiers: 0 },
+    prev: { key: "arrowleft", keyCode: 37, modifiers: 0 },
+    next: { key: "arrowright", keyCode: 39, modifiers: 0 },
+    mode: { key: "m", keyCode: 46, modifiers: 0 },
+    bg: { key: "b", keyCode: 66, modifiers: 0 },
+    speedUp: { key: "]", keyCode: 221, modifiers: 0 },
+    speedDown: { key: "[", keyCode: 219, modifiers: 0 },
+    fontUp: { key: "+", keyCode: 187, modifiers: 512 },
+    fontDown: { key: "-", keyCode: 189, modifiers: 0 },
+    settings: { key: ",", keyCode: 188, modifiers: 0 },
+  };
+  const KEY_DISPLAY = {
+    " ": "Space",
+    arrowleft: "←",
+    arrowright: "→",
+    arrowup: "↑",
+    arrowdown: "↓",
+    escape: "Esc",
+    enter: "Enter",
+    backspace: "Delete",
+  };
+  let recordingName = "";
+  function loadShortcuts() {
+    try {
+      const stored = JSON.parse(localStorage.getItem("ting-shortcuts") || "{}");
+      const merged = {};
+      for (const name of Object.keys(DEFAULT_SHORTCUTS)) {
+        merged[name] = { ...DEFAULT_SHORTCUTS[name], ...(stored[name] || {}) };
+      }
+      return merged;
+    } catch {
+      return JSON.parse(JSON.stringify(DEFAULT_SHORTCUTS));
+    }
+  }
+  function shortcutLabel(sc) {
+    const mods = sc.modifiers || 0;
+    const prefix = (mods & 4096 ? "⌃" : "") + (mods & 2048 ? "⌥" : "") + (mods & 512 ? "⇧" : "") + (mods & 256 ? "⌘" : "");
+    const raw = String(sc.key || "");
+    const key = KEY_DISPLAY[raw] || (raw.length === 1 ? raw.toUpperCase() : raw);
+    return `${prefix}${key}`;
+  }
+  function syncShortcuts() {
+    const shortcuts = loadShortcuts();
+    document.querySelectorAll("[data-shortcut]").forEach((button) => {
+      const name = button.dataset.shortcut;
+      button.textContent = name === recordingName ? "按下快捷键…" : shortcutLabel(shortcuts[name]);
+      button.classList.toggle("recording", name === recordingName);
+    });
+    window.webkit?.messageHandlers?.sync?.postMessage({ action: "setShortcuts", shortcuts });
+  }
+  function saveShortcut(name, value) {
+    const shortcuts = loadShortcuts();
+    shortcuts[name] = value;
+    localStorage.setItem("ting-shortcuts", JSON.stringify(shortcuts));
+    recordingName = "";
+    syncShortcuts();
+    note("快捷键已保存");
+  }
+  function bindShortcuts() {
+    document.querySelectorAll("[data-shortcut]").forEach((button) => {
+      button.addEventListener("click", () => {
+        recordingName = button.dataset.shortcut;
+        syncShortcuts();
+      });
+    });
+    $("resetShortcuts").addEventListener("click", () => {
+      localStorage.setItem("ting-shortcuts", JSON.stringify(DEFAULT_SHORTCUTS));
+      recordingName = "";
+      syncShortcuts();
+      note("已恢复默认");
+    });
+    window.addEventListener("keydown", (event) => {
+      if (!recordingName) return;
+      event.preventDefault();
+      event.stopPropagation();
+      if (event.key === "Escape") {
+        recordingName = "";
+        syncShortcuts();
+        return;
+      }
+      const mods = (event.metaKey ? 256 : 0) | (event.ctrlKey ? 4096 : 0) | (event.altKey ? 2048 : 0) | (event.shiftKey ? 512 : 0);
+      const key = String(event.key || "").toLowerCase();
+      if (!key || key === "meta" || key === "control" || key === "alt" || key === "shift") return;
+      if (recordingName.startsWith("toggle") && !(mods & (256 | 4096 | 2048))) {
+        note("全局快捷键需要包含 ⌘、⌃ 或 ⌥");
+        return;
+      }
+      saveShortcut(recordingName, { key, keyCode: event.keyCode || 0, modifiers: mods });
+    }, true);
+  }
+  function load() {
+    $("mode").value = localStorage.getItem("ting-mode") || "align";
+    $("panel").value = localStorage.getItem("ting-panel-height") || "200";
+    $("bg").value = localStorage.getItem("ting-bg") || "2";
+    $("rate").value = localStorage.getItem("ting-rate") || "1";
+    for (const [id, [key, fallback]] of Object.entries(checks)) {
+      const value = localStorage.getItem(key);
+      $(id).checked = value === null ? fallback : value === "1";
+    }
+  }
+  function closeWindow() {
+    window.webkit?.messageHandlers?.sync?.postMessage({ action: "closeSettings" });
+  }
+  function bind() {
+    for (const [id, key] of Object.entries(fields)) {
+      $(id).addEventListener("change", () => {
+        localStorage.setItem(key, $(id).value);
+        note("已保存");
+      });
+    }
+    for (const [id, [key]] of Object.entries(checks)) {
+      $(id).addEventListener("change", () => {
+        localStorage.setItem(key, $(id).checked ? "1" : "0");
+        note("已保存");
+      });
+    }
+    $("exportSrt").addEventListener("click", () => download("srt"));
+    $("exportMd").addEventListener("click", () => download("md"));
+    $("reload").addEventListener("click", () => {
+      localStorage.setItem("ting-reload", String(Date.now()));
+      note("已请求重新载入");
+    });
+    $("close").addEventListener("click", closeWindow);
+    window.addEventListener("keydown", (event) => {
+      if (event.key === "Escape") closeWindow();
+    });
+  }
+  function download(format) {
+    const a = document.createElement("a");
+    a.href = `/export?format=${format}`;
+    a.download = "";
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+  }
+  load();
+  bind();
+  syncShortcuts();
+  bindShortcuts();
+  setInterval(load, 1000);
+</script>
+</body>
+</html>
