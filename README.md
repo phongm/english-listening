@@ -164,4 +164,5 @@ bin/bilingual-subtitle.mjs  任意 lrc/srt/vtt/txt → 双语对照 md / 双语 
 bin/tr.mjs                  剪贴板/管道/参数 → 译文
 bin/run.sh                  统一入口（上面的命令都走它）
 install.command             双击安装 + 自检，幂等
+docs/分享安装说明.md        发给别人的安装、使用和排障说明
 ```
