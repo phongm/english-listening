@@ -11,6 +11,8 @@
 
 - 「每日英语听力」是 Electron 应用。打开一篇课文后，带逐句时间轴的明文页面会落在
   `~/Library/Application Support/ting_en/ting/tmp/temp/index.html`，每句带 `data-startTime` / `data-endTime`。
+  （Mac App Store 那份在沙盒容器里，路径多了 `Library/Containers/com.eusoft.ting-mac-en/Data/` 前缀，
+  安装器会自己认。）
 - 启动时给 App 加一个**只监听 127.0.0.1** 的调试端口（9333），通过它读播放器 `<video>` 的
   `currentTime`、`duration`、`paused`，按时间轴找到当前句。
 - 绑定课文后在后台把整篇课文交给微软 Edge 的免费翻译端点预翻译，按句缓存到
@@ -26,6 +28,10 @@
 ## 二、装（只做一次）
 
 前置：机器上有 Node.js（`brew install node` 或 nodejs.org 的 LTS 安装包）。
+「每日英语听力」要用**官网直下的 Mac 版**（`ting_en.dmg`，bundle id `com.eusoft.ting.en`，
+下载页 <https://www.eudic.net/v4/en/app/ting>），
+**不能用 Mac App Store 版**：那个版本带 App Sandbox 却没有 `network.server` 权限，Chromium 绑不上
+调试端口，播放进度取不到，字幕条会一直停在「请用「每日英语听力·同步」图标启动 App」。安装器会自己判断并提示。
 置顶字幕条需要 Xcode 命令行工具（`xcode-select --install`）；没有也能装，只是会退回用浏览器窗口。
 
 1. 把仓库放到任意位置。
@@ -107,6 +113,7 @@
 | 现象 | 先看什么 |
 | --- | --- |
 | 字幕条提示「请用「每日英语听力·同步」图标启动 App」 | App 在跑但没开同步端口。退出 App 后双击同步图标；或运行 `ting-sync-launch` |
+| 上面都做了还是不行，`ting-sync-launch` 说「等不到调试端口」 | 本机装的是 Mac App Store 沙盒版：它没有 `network.server` 权限，Chromium 绑不上端口（日志会写 `bind() failed: Operation not permitted`）。换官网直下的 `ting_en.dmg` 版 |
 | 双击同步图标后没有字幕条 | 菜单栏 `captions` 图标 → 显示；或 `ting-sync-stop` 后重开；看 `~/English/logs/ting-sync.log` |
 | 点了字幕条的 X 后找不到 | 它只是隐藏：点菜单栏 `captions` → 显示，或重新双击「同步」/「同步字幕」图标 |
 | 一直「等待音频开始播放」 | 在 App 里真正开始播放一篇带文本的课文 |

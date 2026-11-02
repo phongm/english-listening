@@ -47,7 +47,10 @@ ting_cdp_up() {
 }
 
 ting_app_running() {
-  pgrep -x "每日英语听力" >/dev/null 2>&1
+  # 按 App 的实际路径判定，不用进程名：官网版和 Mac App Store 版同名，
+  # 只按名字找会认错对象。路径要锚死，否则 "/Applications/…" 会命中
+  # "/Users/…/Applications/…" 这种子串。
+  pgrep -f "^$TING_APP/Contents/MacOS/" >/dev/null 2>&1
 }
 
 ting_web_up() {
@@ -191,7 +194,8 @@ case "$cmd" in
   ting-sync-launch)
     if ting_app_running; then
       echo "退出每日英语听力…"
-      osascript -e 'tell application "每日英语听力" to quit' >/dev/null 2>&1
+      # 按路径退出，避免两个版本同名时退掉另一个。
+      osascript -e "tell application \"$TING_APP\" to quit" >/dev/null 2>&1
       wait_i=0
       while [ "$wait_i" -lt 48 ] && ting_app_running; do
         sleep 0.25

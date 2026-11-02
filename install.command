@@ -34,15 +34,41 @@ else
   echo "-- 本机代理 $PROBE 不可用，VOA 抓取将尝试直连（部分网络下不通）"
 fi
 
+# 沙盒版（Mac App Store 那份，bundle id com.eusoft.ting-mac-en）只有 network.client，
+# 没有 network.server，Chromium 的 bind() 会被系统拒掉，9333 调试端口永远起不来，
+# 随播字幕就拿不到播放进度。两个都装时优先用官网直下的非沙盒版。
+ting_sandboxed() {
+  local ent
+  ent="$(codesign -d --entitlements :- "$1" 2>/dev/null)"
+  printf '%s' "$ent" | grep -q "com.apple.security.app-sandbox" || return 1
+  printf '%s' "$ent" | grep -q "com.apple.security.network.server" && return 1
+  return 0
+}
+
+TING_CANDIDATES=("/Applications/每日英语听力.app" "$HOME/Applications/每日英语听力.app")
+for bid in com.eusoft.ting.en com.eusoft.ting-mac-en; do
+  while IFS= read -r p; do
+    [ -n "$p" ] && [ -d "$p" ] && TING_CANDIDATES+=("$p")
+  done < <(mdfind "kMDItemCFBundleIdentifier == '$bid'" 2>/dev/null | grep '\.app$')
+done
+
 TING_APP=""
-for p in "/Applications/每日英语听力.app" "$HOME/Applications/每日英语听力.app"; do
-  [ -d "$p" ] && { TING_APP="$p"; break; }
+for p in "${TING_CANDIDATES[@]}"; do
+  [ -d "$p" ] && ! ting_sandboxed "$p" && { TING_APP="$p"; break; }
 done
 if [ -z "$TING_APP" ]; then
-  TING_APP="$(mdfind 'kMDItemCFBundleIdentifier == "com.eusoft.ting.en"' 2>/dev/null | grep '\.app$' | head -n 1)"
+  for p in "${TING_CANDIDATES[@]}"; do
+    [ -d "$p" ] && { TING_APP="$p"; break; }
+  done
 fi
-if [ -n "$TING_APP" ] && [ -d "$TING_APP" ]; then
+
+if [ -n "$TING_APP" ]; then
   echo "ok 每日英语听力: $TING_APP"
+  if ting_sandboxed "$TING_APP"; then
+    echo "!! 这台机器上只有 Mac App Store 的沙盒版，它开不了同步端口（缺 network.server），随播字幕无法跟播。"
+    echo "   装官网直下的非沙盒版再重跑本安装：https://www.eudic.net/v4/en/app/ting 里的 ting_en.dmg"
+    echo "   其余功能（译剪贴板 / 抓课文 / 双语对照）不受影响。"
+  fi
 else
   TING_APP="/Applications/每日英语听力.app"
   echo "-- 没检测到每日英语听力；装好后如路径不同，改 ~/English/config 里的 TING_APP"
@@ -61,15 +87,27 @@ TING_WEB_PORT="8787"
 EOF
 echo "ok 配置: $CONF"
 
+# 课文页位置：非沙盒版在 ~/Library/Application Support/ting_en，
+# 沙盒版（App Store）在它的容器目录里。以本次选中的 App 为准；
+# 两个 App 都没检测到时，哪边已经有课文就用哪边。
+TEMP_PLAIN="$HOME/Library/Application Support/ting_en/ting/tmp/temp/index.html"
+TEMP_SANDBOX="$HOME/Library/Containers/com.eusoft.ting-mac-en/Data/Library/Application Support/ting_en/ting/tmp/temp/index.html"
+if [ -d "$TING_APP" ]; then
+  if ting_sandboxed "$TING_APP"; then TEMP_HTML="$TEMP_SANDBOX"; else TEMP_HTML="$TEMP_PLAIN"; fi
+else
+  TEMP_HTML="$TEMP_PLAIN"
+  [ ! -f "$TEMP_PLAIN" ] && [ -f "$TEMP_SANDBOX" ] && TEMP_HTML="$TEMP_SANDBOX"
+fi
+
 cat > "$CONF_DIR/ting-sync.conf" <<EOF
 # ting-sync 配置（install.command 生成；改端口/缓存目录后重启同步服务）
-TEMP_HTML="$HOME/Library/Application Support/ting_en/ting/tmp/temp/index.html"
+TEMP_HTML="$TEMP_HTML"
 CDP_PORT="9333"
 WEB_PORT="8787"
 CACHE_DIR="$CONF_DIR/ting-cache"
 TR_PROXY="$PROXY"
 EOF
-echo "ok 同步配置: $CONF_DIR/ting-sync.conf"
+echo "ok 同步配置: $CONF_DIR/ting-sync.conf（课文页: $TEMP_HTML）"
 
 cat > "$CONF_DIR/run.sh" <<EOF
 #!/bin/bash

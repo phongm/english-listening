@@ -11,7 +11,8 @@
 要求：
 
 - macOS。
-- 已安装「每日英语听力」。
+- 已安装「每日英语听力」，而且要的是**官网直下的 Mac 版**（`ting_en.dmg`）。
+  Mac App Store 那份是沙盒版，开不了本地同步端口，字幕不会跟播。
 - 已安装 Node.js。
 - 已安装 Xcode 命令行工具。
 - 播放的课文必须有逐句文本 / 时间轴。
@@ -128,6 +129,16 @@
 
 1. 退出每日英语听力。
 2. 双击 `~/Applications/每日英语听力·同步`。
+
+如果照上面做完还是不行，先确认装的不是 App Store 版：
+
+```bash
+codesign -d --entitlements :- "/Applications/每日英语听力.app" 2>/dev/null | grep -o "com.apple.security.app-sandbox"
+```
+
+有输出就是沙盒版。App Sandbox 不让程序监听端口，所以同步端口永远起不来，
+字幕也就拿不到播放进度。换成官网直下的 `ting_en.dmg` 版本（<https://www.eudic.net/v4/en/app/ting>），
+再重跑一次 `install.command`。
 
 ### 没有字幕条
 
