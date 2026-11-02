@@ -23,8 +23,21 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, WKNa
     private var eventHandlerRef: EventHandlerRef?
     private var hotKeyRefs: [UInt32: EventHotKeyRef] = [:]
     private let hotKeySignature: OSType = 0x54535542
-    private let hotKeyToggleSubtitle: UInt32 = 1
-    private let hotKeyToggleSettings: UInt32 = 2
+    private let hotKeyNames: [String: UInt32] = [
+        "toggleSubtitle": 1,
+        "toggleSettings": 2,
+        "play": 3,
+        "prev": 4,
+        "next": 5,
+        "mode": 6,
+        "bg": 7,
+        "speedUp": 8,
+        "speedDown": 9,
+        "fontUp": 10,
+        "fontDown": 11,
+        "settings": 12
+    ]
+    private var hotKeyNamesById: [UInt32: String] = [:]
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.setActivationPolicy(.accessory)
@@ -52,6 +65,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, WKNa
         parseArguments()
         buildPanel()
         buildStatusItem()
+        seedDefaultShortcutsIfNeeded()
         installHotKeyHandler()
         registerHotKeys()
     }
@@ -279,6 +293,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, WKNa
         saveFrame()
     }
 
+    private func seedDefaultShortcutsIfNeeded() {
+        guard UserDefaults.standard.dictionary(forKey: "shortcuts") == nil else { return }
+        UserDefaults.standard.set([
+            "toggleSubtitle": ["keyCode": Int(kVK_ANSI_B), "modifiers": Int(cmdKey)],
+            "toggleSettings": ["keyCode": Int(kVK_ANSI_S), "modifiers": Int(cmdKey | shiftKey)]
+        ], forKey: "shortcuts")
+    }
+
     private func installHotKeyHandler() {
         var spec = EventTypeSpec(
             eventClass: OSType(kEventClassKeyboard),
@@ -317,53 +339,45 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, WKNa
         }
         hotKeyRefs.removeAll()
         let stored = UserDefaults.standard.dictionary(forKey: "shortcuts") as? [String: Any] ?? [:]
-        registerHotKey(
-            name: "toggleSubtitle",
-            id: hotKeyToggleSubtitle,
-            stored: stored,
-            defaultKeyCode: UInt32(kVK_ANSI_B),
-            defaultModifiers: UInt32(cmdKey)
-        )
-        registerHotKey(
-            name: "toggleSettings",
-            id: hotKeyToggleSettings,
-            stored: stored,
-            defaultKeyCode: UInt32(kVK_ANSI_S),
-            defaultModifiers: UInt32(cmdKey | shiftKey)
-        )
-    }
-
-    private func registerHotKey(
-        name: String,
-        id: UInt32,
-        stored: [String: Any],
-        defaultKeyCode: UInt32,
-        defaultModifiers: UInt32
-    ) {
-        let item = stored[name] as? [String: Any]
-        let keyCode = UInt32((item?["keyCode"] as? Int) ?? Int(defaultKeyCode))
-        let modifiers = UInt32((item?["modifiers"] as? Int) ?? Int(defaultModifiers))
-        var ref: EventHotKeyRef?
-        let hotKeyID = EventHotKeyID(signature: hotKeySignature, id: id)
-        let status = RegisterEventHotKey(
-            keyCode,
-            modifiers,
-            hotKeyID,
-            GetApplicationEventTarget(),
-            0,
-            &ref
-        )
-        if status == noErr, let ref = ref {
-            hotKeyRefs[id] = ref
+        let globalModifierMask = UInt32(cmdKey | controlKey | optionKey)
+        for (name, id) in hotKeyNames {
+            guard let item = stored[name] as? [String: Any] else { continue }
+            let keyCode = UInt32((item["keyCode"] as? Int) ?? 0)
+            let modifiers = UInt32((item["modifiers"] as? Int) ?? 0)
+            guard keyCode > 0, modifiers & globalModifierMask != 0 else { continue }
+            var ref: EventHotKeyRef?
+            let hotKeyID = EventHotKeyID(signature: hotKeySignature, id: id)
+            let status = RegisterEventHotKey(
+                keyCode,
+                modifiers,
+                hotKeyID,
+                GetApplicationEventTarget(),
+                0,
+                &ref
+            )
+            if status == noErr, let ref = ref {
+                hotKeyRefs[id] = ref
+            }
         }
     }
 
     private func handleHotKey(_ id: UInt32) {
-        if id == hotKeyToggleSubtitle {
+        let name = hotKeyNames.first(where: { $0.value == id })?.key
+        switch name {
+        case "toggleSubtitle":
             toggleSubtitlePanel()
-        } else if id == hotKeyToggleSettings {
+        case "toggleSettings", "settings":
             toggleSettings()
+        case let command?:
+            runShortcutInOverlay(command)
+        default:
+            break
         }
+    }
+
+    private func runShortcutInOverlay(_ command: String) {
+        let escaped = command.replacingOccurrences(of: "'", with: "\\'")
+        webView?.evaluateJavaScript("if (typeof runShortcut === 'function') runShortcut('\(escaped)');", completionHandler: nil)
     }
 
     private func appendOverlayLog(_ line: String) {
@@ -411,9 +425,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, WKNa
         } else if action == "closeSettings" {
             settingsWindow?.close()
         } else if action == "setShortcuts", let shortcuts = body["shortcuts"] as? [String: Any] {
-            let allowed = ["toggleSubtitle", "toggleSettings"]
             let filtered = shortcuts.reduce(into: [String: Any]()) { result, pair in
-                if allowed.contains(pair.key), let value = pair.value as? [String: Any] {
+                if hotKeyNames[pair.key] != nil, let value = pair.value as? [String: Any] {
                     result[pair.key] = [
                         "keyCode": value["keyCode"] as? Int ?? 0,
                         "modifiers": value["modifiers"] as? Int ?? 0

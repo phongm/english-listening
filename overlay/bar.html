@@ -352,9 +352,10 @@
 
   function syncShortcutsToNative() {
     const payload = {};
-    for (const name of GLOBAL_SHORTCUT_NAMES) {
-      const sc = shortcuts[name];
-      if (sc) payload[name] = { keyCode: sc.keyCode || 0, modifiers: sc.modifiers || 0 };
+    for (const [name, sc] of Object.entries(shortcuts)) {
+      if (sc?.keyCode && sc?.modifiers) {
+        payload[name] = { keyCode: sc.keyCode, modifiers: sc.modifiers };
+      }
     }
     native({ action: "setShortcuts", shortcuts: payload });
   }
@@ -1128,6 +1129,10 @@
     else if (name === "fontDown") { zhSize -= 1; applySize(); fitPanelToContent(true); }
   }
 
+  function hasGlobalModifier(modifiers) {
+    return Boolean((modifiers || 0) & (256 | 4096 | 2048));
+  }
+
   document.addEventListener("keydown", (event) => {
     if (event.target.closest("input, select, button")) return;
     if (event.key === "Escape") {
@@ -1136,7 +1141,7 @@
       return;
     }
     for (const [name, shortcut] of Object.entries(shortcuts)) {
-      if (GLOBAL_SHORTCUT_NAMES.includes(name)) continue;
+      if (hasGlobalModifier(shortcut.modifiers)) continue;
       if (matchesShortcut(event, shortcut)) {
         event.preventDefault();
         runShortcut(name);

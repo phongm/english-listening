@@ -17,6 +17,7 @@
   main { padding: 16px 22px 24px; }
   section { margin: 0 0 18px; padding: 12px 14px; border: 1px solid rgba(255,255,255,.12); border-radius: 12px; background: rgba(255,255,255,.04); }
   h2 { margin: 0 0 10px; font-size: 13px; color: #9fb0e8; font-weight: 650; }
+  .tip { margin: -4px 0 10px; color: rgba(255,255,255,.58); font-size: 12px; }
   .row { display: flex; align-items: center; justify-content: space-between; gap: 16px; min-height: 34px; }
   label { color: rgba(255,255,255,.86); }
   select, button {
@@ -34,8 +35,8 @@
 </head>
 <body>
 <header>
-  <div class="headrow"><h1>同步字幕设置</h1><button id="close">关闭</button></div>
-  <p>这里改完会自动保存，字幕条会在 1 秒内同步。</p>
+  <h1>同步字幕设置</h1>
+  <p>这里改完会自动保存，字幕条会在 1 秒内同步。点击字幕条齿轮或按全局快捷键可再次隐藏。</p>
 </header>
 <main>
   <section>
@@ -58,6 +59,7 @@
   </section>
   <section>
     <h2>快捷键</h2>
+    <p class="tip">带 ⌘ / ⌃ / ⌥ 的快捷键会全局生效；无修饰键的快捷键只在字幕条获得焦点时生效。</p>
     <div class="row"><label>显示 / 隐藏字幕条</label><button class="shortcut" data-shortcut="toggleSubtitle"></button></div>
     <div class="row"><label>显示 / 隐藏设置</label><button class="shortcut" data-shortcut="toggleSettings"></button></div>
     <div class="row"><label>暂停 / 继续</label><button class="shortcut" data-shortcut="play"></button></div>
@@ -228,9 +230,8 @@
       localStorage.setItem("ting-reload", String(Date.now()));
       note("已请求重新载入");
     });
-    $("close").addEventListener("click", closeWindow);
     window.addEventListener("keydown", (event) => {
-      if (event.key === "Escape") closeWindow();
+      if (event.key === "Escape" && !recordingName) closeWindow();
     });
   }
   function download(format) {
