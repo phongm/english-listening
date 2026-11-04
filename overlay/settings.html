@@ -52,6 +52,7 @@
   <section>
     <h2>播放</h2>
     <div class="row"><label for="rate">倍速</label><select id="rate"><option value="0.5">0.5x</option><option value="0.75">0.75x</option><option value="1">1x</option><option value="1.25">1.25x</option><option value="1.5">1.5x</option><option value="2">2x</option></select></div>
+    <div class="row"><label>字幕时间偏移</label><div class="actions"><button data-offset="-0.5">-0.5s</button><span id="offsetValue">0s</span><button data-offset="0.5">+0.5s</button><button id="offsetReset">重置</button></div></div>
     <div class="row"><label for="rateAuto">记住并应用倍速</label><input id="rateAuto" type="checkbox"></div>
     <div class="row"><label for="hoverPause">悬停单词暂停</label><input id="hoverPause" type="checkbox"></div>
     <div class="row"><label for="autoResume">离开后继续播放</label><input id="autoResume" type="checkbox"></div>
@@ -202,6 +203,36 @@
       saveShortcut(recordingName, { key, keyCode: event.keyCode || 0, modifiers: mods });
     }, true);
   }
+  async function loadOffset() {
+    try {
+      const response = await fetch("/state");
+      const data = await response.json();
+      $("offsetValue").textContent = `${Number(data.timeOffset || 0).toFixed(1)}s`;
+    } catch {}
+  }
+  async function setOffset(value) {
+    try {
+      const response = await fetch("/offset", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ offset: Number(value) }),
+      });
+      const data = await response.json();
+      if (data?.ok) {
+        $("offsetValue").textContent = `${Number(data.offset || 0).toFixed(1)}s`;
+        note("偏移已应用");
+      }
+    } catch {}
+  }
+  function bindOffset() {
+    document.querySelectorAll("[data-offset]").forEach((button) => {
+      button.addEventListener("click", async () => {
+        const current = Number(($("offsetValue").textContent || "0").replace("s", "")) || 0;
+        await setOffset(Math.max(-15, Math.min(15, current + Number(button.dataset.offset))));
+      });
+    });
+    $("offsetReset").addEventListener("click", () => setOffset(0));
+  }
   function load() {
     $("mode").value = localStorage.getItem("ting-mode") || "align";
     $("panel").value = localStorage.getItem("ting-panel-height") || "200";
@@ -248,9 +279,12 @@
   }
   load();
   bind();
+  bindOffset();
   syncShortcuts();
   bindShortcuts();
+  loadOffset();
   setInterval(load, 1000);
+  setInterval(loadOffset, 1500);
 </script>
 </body>
 </html>

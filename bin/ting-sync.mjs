@@ -200,8 +200,10 @@ function cuesFitDuration(cues, duration) {
   if (!cues.length) return false;
   if (!duration || duration < 1) return true;
   const maxEnd = cues[cues.length - 1].end;
-  const tolerance = Math.max(5, duration * 0.01);
-  return Math.abs(maxEnd - duration) <= tolerance;
+  const minReasonable = duration * 0.65;
+  const lateTolerance = Math.max(20, duration * 0.12);
+  const earlyTolerance = Math.max(5, duration * 0.02);
+  return maxEnd >= minReasonable && maxEnd <= duration + earlyTolerance && duration - maxEnd <= lateTolerance;
 }
 
 function loadCache(file) {
@@ -728,6 +730,8 @@ class Sync {
     this.alignCachePath = join(conf.CACHE_DIR, "alignments.json");
     this.alignPending = new Map();
     this.alignSaveTimer = null;
+    this.timeOffset = 0;
+    this.boundDuration = 0;
     this.vocabPath = join(conf.CACHE_DIR, "vocabulary.json");
     this.state = {
       status: "booting",
@@ -743,9 +747,11 @@ class Sync {
       nextEn: "",
       nextZh: "",
       t: 0,
+      mediaT: 0,
       d: 0,
       paused: true,
       rate: 1,
+      timeOffset: 0,
       cueStart: 0,
       cueEnd: 0,
       cueCount: 0,
@@ -858,6 +864,7 @@ class Sync {
 
     this.article.key = key;
     this.article.uuid = uuid;
+    this.boundDuration = Number(video.d) || 0;
     this.cachePath = join(conf.CACHE_DIR, `${key}.json`);
     this.zh = loadCache(this.cachePath);
     this.cursor = cueIndexAt(this.article.cues, video.t);
@@ -976,12 +983,29 @@ class Sync {
       if (!this.bindArticleToVideo(video)) return;
     }
 
+    if (this.article.key && !cuesFitDuration(this.article.cues, video.d)) {
+      const maxEnd = this.article.cues[this.article.cues.length - 1]?.end || 0;
+      if (Date.now() - this.lastStaleLog > 3000) {
+        this.lastStaleLog = Date.now();
+        log(`播放中检测到时间轴不再匹配（末句 ${maxEnd.toFixed(1)}s / 音频 ${Number(video.d).toFixed(1)}s）`);
+      }
+      this.article.key = null;
+      this.article.uuid = "";
+      this.boundDuration = 0;
+      this.setStatus("stale-cues", "课文时间轴和当前音频不一致…");
+      return;
+    }
+
+    this.boundDuration = Number(video.d) || this.boundDuration;
+
     this.updateFromVideo(video);
   }
 
   updateFromVideo(video) {
     const cues = this.article.cues;
-    const idx = cueIndexAt(cues, video.t);
+    const mediaTime = Number(video.t) || 0;
+    const timed = mediaTime + this.timeOffset;
+    const idx = cueIndexAt(cues, timed);
     if (idx < 0) return;
     const current = cues[idx];
     const next = cues[idx + 1];
@@ -997,7 +1021,9 @@ class Sync {
     this.state.words = this.glossMapFor(current.text);
     this.state.nextEn = next?.text || "";
     this.state.nextZh = next ? this.zh.get(next.hash) || "" : "";
-    this.state.t = video.t;
+    this.state.t = timed;
+    this.state.mediaT = mediaTime;
+    this.state.timeOffset = this.timeOffset;
     this.state.d = video.d;
     this.state.paused = video.paused;
     this.state.rate = Number(video.rate) || 1;
@@ -1676,6 +1702,93 @@ function serveOverlay(sync) {
       return;
     }
 
+    if (url.pathname === "/debug/article") {
+      const cues = sync.article?.cues || [];
+      sendJson(200, {
+        ok: true,
+        key: sync.article?.key || null,
+        uuid: sync.article?.uuid || null,
+        title: sync.article?.title || "",
+        signature: sync.article?.signature || "",
+        cues: cues.length,
+        first: cues[0] || null,
+        last: cues[cues.length - 1] || null,
+        cacheCount: sync.zh?.size || 0,
+        state: { idx: sync.state.idx, t: sync.state.t, d: sync.state.d, en: sync.state.en, zh: sync.state.zh },
+      });
+      return;
+    }
+
+    if (url.pathname === "/debug/sentences") {
+      const expression = `(() => {
+        const video = document.querySelector('video');
+        const t = Number(video?.currentTime) || 0;
+        const spans = [...document.querySelectorAll('span.sentence, span[class*="sentence"]')];
+        return spans.slice(0, 80).map((el, i) => ({
+          i,
+          start: el.getAttribute('data-startTime') || '',
+          end: el.getAttribute('data-endTime') || '',
+          cls: String(el.className || '').slice(0, 120),
+          style: String(el.getAttribute('style') || '').slice(0, 120),
+          text: String(el.textContent || '').replace(/\\s+/g, ' ').trim().slice(0, 100),
+        }));
+      })()`;
+      try {
+        const sentences = sync.cdpInfo?.cdp ? await sync.cdpInfo.cdp.evaluate(expression, 3000) : null;
+        sendJson(200, { ok: Boolean(sentences), sentences: sentences || [] });
+      } catch (error) {
+        sendJson(500, { ok: false, error: error.message });
+      }
+      return;
+    }
+
+    if (url.pathname === "/debug/current") {
+      const expression = `(() => {
+        const video = document.querySelector('video');
+        const all = [...document.querySelectorAll('*')];
+        const active = all
+          .filter((el) => /\\b(current|active|playing|now|on)\\b/i.test(String(el.className || '')))
+          .slice(0, 30)
+          .map((el) => ({
+            tag: el.tagName,
+            id: el.id || '',
+            cls: String(el.className || '').slice(0, 160),
+            text: String(el.textContent || '').replace(/\\s+/g, ' ').trim().slice(0, 160),
+          }));
+        return { currentTime: Number(video?.currentTime) || 0, active };
+      })()`;
+      try {
+        const result = sync.cdpInfo?.cdp ? await sync.cdpInfo.cdp.evaluate(expression, 3000) : null;
+        sendJson(200, { ok: Boolean(result), result: result || null });
+      } catch (error) {
+        sendJson(500, { ok: false, error: error.message });
+      }
+      return;
+    }
+
+    if (url.pathname === "/debug/media") {
+      const expression = `(() => {
+        const nodes = [...document.querySelectorAll('video, audio')];
+        return nodes.map((el, i) => ({
+          i,
+          tag: el.tagName,
+          currentTime: Number(el.currentTime) || 0,
+          duration: Number(el.duration) || 0,
+          paused: !!el.paused,
+          rate: Number(el.playbackRate) || 1,
+          visible: !!el.offsetParent,
+          src: String(el.currentSrc || el.src || '').slice(0, 220),
+        }));
+      })()`;
+      try {
+        const nodes = sync.cdpInfo?.cdp ? await sync.cdpInfo.cdp.evaluate(expression, 3000) : null;
+        sendJson(200, { ok: Boolean(nodes), nodes: nodes || [] });
+      } catch (error) {
+        sendJson(500, { ok: false, error: error.message });
+      }
+      return;
+    }
+
     if (url.pathname === "/word") {
       const entry = await sync.lookupWord(url.searchParams.get("w") || "");
       if (!entry) {
@@ -1754,6 +1867,32 @@ function serveOverlay(sync) {
         "Cache-Control": "no-store",
       });
       response.end(exported.body);
+      return;
+    }
+
+    if (url.pathname === "/offset" && request.method === "POST") {
+      let body = "";
+      request.on("data", (chunk) => {
+        body += chunk;
+        if (body.length > 4096) request.destroy();
+      });
+      request.on("end", () => {
+        try {
+          const payload = JSON.parse(body || "{}");
+          const offset = Number(payload.offset);
+          if (!Number.isFinite(offset)) {
+            sendJson(400, { ok: false, error: "需要数字 offset" });
+            return;
+          }
+          sync.timeOffset = Math.max(-15, Math.min(15, offset));
+          sync.state.timeOffset = sync.timeOffset;
+          if (sync.video) sync.updateFromVideo(sync.video);
+          sync.broadcast(true);
+          sendJson(200, { ok: true, offset: sync.timeOffset });
+        } catch (error) {
+          sendJson(400, { ok: false, error: error.message });
+        }
+      });
       return;
     }
 
